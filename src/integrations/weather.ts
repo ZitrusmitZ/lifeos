@@ -66,7 +66,7 @@ async function placeName({ lat, lon }: Coords): Promise<string | null> {
   try {
     const res = await fetchJson<{ address?: Record<string, string> }>(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&accept-language=de&lat=${lat}&lon=${lon}`,
-      { headers: { "User-Agent": "LifeOS dashboard (github.com/SpySpecter/lifeos)" } },
+      { headers: { "User-Agent": "LifeOS dashboard (github.com/ZitrusmitZ/lifeos)" } },
       5000,
     );
     const a = res.address ?? {};

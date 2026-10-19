@@ -56,7 +56,7 @@ Writes go through Server Actions (`src/app/actions.ts`), each input validated wi
 
 - `Dockerfile`: multi-stage build, Next.js `standalone` output, runs as `node`, healthcheck on `/api/health`.
 - `compose.yaml`: port published on `127.0.0.1` only, 512 MB memory limit, `no-new-privileges`, all capabilities dropped.
-- `.github/workflows/release.yml`: builds and pushes `ghcr.io/spyspecter/lifeos:{latest,sha}` on every push to `main`.
+- `.github/workflows/release.yml`: builds and pushes `ghcr.io/zitrusmitz/lifeos:{latest,sha}` on every push to `main`.
 - `deploy/systemd/lifeos-update.timer`: `git pull`, `docker compose pull && up -d` every 10 minutes (pull-based CD, no inbound access needed).
 - `deploy/systemd/lifeos-backup.timer`: nightly `VACUUM INTO` snapshot, 14-day retention.
 - `deploy/bootstrap-vps.sh`: idempotent provisioning; `--lockdown-ssh` closes public SSH once you're connected through Tailscale.
