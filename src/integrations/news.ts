@@ -187,7 +187,7 @@ export async function fetchArticle(link: string): Promise<Response | null> {
       signal,
       cache: "no-store",
       redirect: "manual",
-      headers: { "User-Agent": "Mozilla/5.0 (LifeOS dashboard; +https://github.com/SpySpecter/lifeos)", Accept: "text/html" },
+      headers: { "User-Agent": "Mozilla/5.0 (LifeOS dashboard; +https://github.com/ZitrusmitZ/lifeos)", Accept: "text/html" },
     });
     const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
     if (!location) return res;
@@ -266,7 +266,7 @@ export const news: Integration<NewsItem[]> = {
         const res = await fetch(url, {
           signal: AbortSignal.timeout(8000),
           cache: "no-store",
-          headers: { "User-Agent": "LifeOS dashboard (github.com/SpySpecter/lifeos)" },
+          headers: { "User-Agent": "LifeOS dashboard (github.com/ZitrusmitZ/lifeos)" },
         });
         if (!res.ok) throw new IntegrationError(`${name}: HTTP ${res.status}`);
         // pro Quelle nur die neuesten 15, damit große Feeds (heise: 150) nicht alles verdrängen

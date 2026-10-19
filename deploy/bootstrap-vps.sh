@@ -3,7 +3,7 @@
 #
 # Läuft aus einem Git-Klon des Repos, nichts wird per curl nachgeladen:
 #   gh auth login -s read:packages            # einmalig, als normaler Nutzer
-#   sudo git clone https://github.com/SpySpecter/lifeos /opt/lifeos
+#   sudo git clone https://github.com/ZitrusmitZ/lifeos /opt/lifeos
 #   sudo bash /opt/lifeos/deploy/bootstrap-vps.sh
 #   sudo --preserve-env=SSH_CLIENT bash /opt/lifeos/deploy/bootstrap-vps.sh --lockdown-ssh   # danach: öffentliches SSH schließen
 #

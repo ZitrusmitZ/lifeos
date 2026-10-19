@@ -18,7 +18,7 @@ Dann auf dem VPS (als normaler Nutzer mit sudo):
 
 ```bash
 gh auth login --web -s read:packages        # Gerätecode im Browser bestätigen
-sudo git clone https://github.com/SpySpecter/lifeos /opt/lifeos
+sudo git clone https://github.com/ZitrusmitZ/lifeos /opt/lifeos
 sudo bash /opt/lifeos/deploy/bootstrap-vps.sh
 ```
 

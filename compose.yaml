@@ -1,7 +1,7 @@
 # LifeOS – lokal: `docker compose up --build`, auf dem VPS: Image aus GHCR (deploy/bootstrap-vps.sh)
 services:
   lifeos:
-    image: ghcr.io/spyspecter/lifeos:latest
+    image: ghcr.io/zitrusmitz/lifeos:latest
     build: .
     container_name: lifeos
     restart: unless-stopped

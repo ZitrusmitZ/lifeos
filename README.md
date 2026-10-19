@@ -5,8 +5,8 @@
 **A self-hosted life dashboard — school timetable, calendar, inbox, health, habits, code and music on one screen.**
 Runs 24/7 on a 5 € VPS and is reachable **only inside my Tailscale network**.
 
-[![CI](https://github.com/SpySpecter/lifeos/actions/workflows/ci.yml/badge.svg)](https://github.com/SpySpecter/lifeos/actions/workflows/ci.yml)
-[![Release image](https://github.com/SpySpecter/lifeos/actions/workflows/release.yml/badge.svg)](https://github.com/SpySpecter/lifeos/actions/workflows/release.yml)
+[![CI](https://github.com/ZitrusmitZ/lifeos/actions/workflows/ci.yml/badge.svg)](https://github.com/ZitrusmitZ/lifeos/actions/workflows/ci.yml)
+[![Release image](https://github.com/ZitrusmitZ/lifeos/actions/workflows/release.yml/badge.svg)](https://github.com/ZitrusmitZ/lifeos/actions/workflows/release.yml)
 ![Next.js 16](https://img.shields.io/badge/Next.js-16-black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
@@ -105,7 +105,7 @@ Next.js 16 (App Router, Cache Components, Server Actions) · React 19 · TypeScr
 ## Run it locally
 
 ```bash
-git clone https://github.com/SpySpecter/lifeos && cd lifeos
+git clone https://github.com/ZitrusmitZ/lifeos && cd lifeos
 npm install
 npm run dev:demo        # http://localhost:3000 with demo data, no keys needed
 ```
@@ -124,7 +124,7 @@ One script turns a fresh Ubuntu 24.04 VPS into a Tailscale-only host running Lif
 
 ```bash
 gh auth login --web -s read:packages
-sudo git clone https://github.com/SpySpecter/lifeos /opt/lifeos
+sudo git clone https://github.com/ZitrusmitZ/lifeos /opt/lifeos
 sudo bash /opt/lifeos/deploy/bootstrap-vps.sh
 ```
 
@@ -145,4 +145,4 @@ tests/              Vitest suites + fixtures
 
 ## License
 
-MIT © SpySpecter
+MIT © ZitrusmitZ
