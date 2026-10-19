@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { accessConfigFromEnv, checkAccess, checkOrigin } from "@/lib/access";
+import { accessConfigFromEnv, checkOrigin } from "@/lib/access";
+import { checkAccessLive } from "@/lib/tailscale-identity";
 
 const text = (body: string, status: number) =>
   new NextResponse(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 
-export function proxy(request: NextRequest) {
-  const decision = checkAccess(request.nextUrl.pathname, request.headers.get("tailscale-user-login"), accessConfigFromEnv());
+export async function proxy(request: NextRequest) {
+  const decision = await checkAccessLive(request.nextUrl.pathname, request.headers.get("tailscale-user-login"), accessConfigFromEnv());
   if (!decision.allowed) return text(decision.reason, decision.status);
 
   const origin = checkOrigin(

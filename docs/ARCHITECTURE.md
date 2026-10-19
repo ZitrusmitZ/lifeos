@@ -4,7 +4,7 @@
 
 1. A device in the tailnet opens `https://lifeos.<tailnet>.ts.net`.
 2. `tailscaled` on the VPS terminates TLS (`tailscale serve --https=443`), strips any client-supplied `Tailscale-*` headers and adds `Tailscale-User-Login` / `Tailscale-User-Name` for the authenticated tailnet user, then proxies to `127.0.0.1:3000`.
-3. `src/proxy.ts` (Next.js 16's renamed middleware) runs `checkAccess()` from `src/lib/access.ts`: no identity → 401, identity not on `ALLOWED_TAILSCALE_USERS` → 403. `/api/ingest/*` (own bearer token) and `/api/health` (Docker healthcheck) are exempt.
+3. `src/proxy.ts` (Next.js 16's renamed middleware) runs `checkAccess()` from `src/lib/access.ts`: no identity → 401, identity not on `ALLOWED_TAILSCALE_USERS` → 403. Entries can be `owner` or numeric Tailscale user IDs, resolved to current logins via tailscaled's LocalAPI (socket mounted read-only, cached 60 s, re-fetched once on a 403) so a renamed login keeps working. `/api/ingest/*` (own bearer token) and `/api/health` (Docker healthcheck) are exempt.
 4. The page renders a prerendered static shell (Cache Components / Partial Prerendering). Every widget is an async Server Component behind its own `<Suspense>`, so slow or failing sources never block the rest.
 
 ## Integrations

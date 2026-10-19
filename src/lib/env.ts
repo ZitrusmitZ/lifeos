@@ -24,6 +24,7 @@ const schema = z.object({
   // Zugriffsschutz: Tailscale `serve` setzt diesen Header für Nutzer im Tailnet.
   REQUIRE_TAILSCALE_AUTH: bool,
   ALLOWED_TAILSCALE_USERS: optional,
+  TAILSCALE_SOCKET: optional,
   ENCRYPTION_KEY: optional,
   INGEST_TOKEN: optional,
 
@@ -81,13 +82,6 @@ export function env(): Env {
 
 export function isDemo(): boolean {
   return env().DEMO_MODE;
-}
-
-export function allowedUsers(): string[] {
-  return (env().ALLOWED_TAILSCALE_USERS ?? "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
 }
 
 /** Format je Eintrag: `Name|URL|Kategorie` (Kategorie optional, Standard „Allgemein“). */
