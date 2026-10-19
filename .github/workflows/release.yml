@@ -41,7 +41,8 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/spyspecter/lifeos
+          # aus dem Repo abgeleitet (metadata-action schreibt klein) – übersteht Umbenennungen des GitHub-Accounts
+          images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest
             type=raw,value=sha-${{ steps.rev.outputs.short }}
