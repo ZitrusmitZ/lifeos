@@ -6,17 +6,35 @@
  * Fehlt der Header, kommt die Anfrage nicht über Tailscale – sie wird abgelehnt.
  */
 export type AccessConfig = { demo: boolean; requireTailscale: boolean; allowedUsers: string[] };
+/** Aktueller Stand aus `tailscaled`: Nutzer-ID des Server-Besitzers und Login je Nutzer-ID (kleingeschrieben). */
+export type TailnetIdentity = { ownerId: string; logins: Record<string, string> };
 export type AccessDecision = { allowed: true; user: string | null } | { allowed: false; status: 401 | 403; reason: string };
 
 /** Pfade mit eigener Authentifizierung bzw. ohne sensible Daten. */
 // Icons vollständig verankert, damit künftige Routen wie „/icons-…“ nicht versehentlich öffentlich werden
 const PUBLIC_PATHS = [/^\/api\/health$/, /^\/api\/ingest\//, /^\/api\/jobs\//, /^\/manifest\.webmanifest$/, /^\/icon\.svg$/, /^\/apple-icon$/];
 
-export function checkAccess(path: string, login: string | null, cfg: AccessConfig): AccessDecision {
+/**
+ * Allowlist-Einträge: ein Login (`name@github`), eine Tailscale-Nutzer-ID (Ziffern) oder `owner` (Besitzer dieses
+ * Servers). IDs und `owner` überstehen Umbenennungen des Logins; sie brauchen den Stand aus `tailscaled`.
+ */
+export function usesTailnetLookup(cfg: AccessConfig): boolean {
+  return cfg.allowedUsers.some((entry) => !entry.includes("@"));
+}
+
+function isAllowed(login: string, entries: string[], identity: TailnetIdentity | null): boolean {
+  return entries.some((entry) => {
+    if (entry.includes("@")) return entry === login;
+    if (!identity) return false;
+    return identity.logins[entry === "owner" ? identity.ownerId : entry] === login;
+  });
+}
+
+export function checkAccess(path: string, login: string | null, cfg: AccessConfig, identity: TailnetIdentity | null = null): AccessDecision {
   if (cfg.demo || !cfg.requireTailscale) return { allowed: true, user: login };
   if (PUBLIC_PATHS.some((re) => re.test(path))) return { allowed: true, user: login };
   if (!login) return { allowed: false, status: 401, reason: "Nur über Tailscale erreichbar." };
-  if (cfg.allowedUsers.length && !cfg.allowedUsers.includes(login.toLowerCase())) {
+  if (cfg.allowedUsers.length && !isAllowed(login.toLowerCase(), cfg.allowedUsers, identity)) {
     return { allowed: false, status: 403, reason: "Dieser Tailscale-Nutzer hat keinen Zugriff." };
   }
   return { allowed: true, user: login };

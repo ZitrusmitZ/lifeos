@@ -43,7 +43,7 @@ cd /opt/lifeos && sudo docker compose up -d --no-build
 
 | Variable | Woher |
 |---|---|
-| `ALLOWED_TAILSCALE_USERS` | Dein Tailscale-Login, z. B. `SpySpecter@github` (steht in der Admin-Konsole unter *Users*). |
+| `ALLOWED_TAILSCALE_USERS` | `owner` (Standard): nur der Tailscale-Nutzer, dem der Server gehört – übersteht Umbenennungen des Logins. Alternativ Nutzer-IDs oder Logins wie `name@github`, kommagetrennt. |
 | `UNTIS_SERVER` / `UNTIS_SCHOOL` | Aus der WebUntis-Adresse im Browser: `https://<SERVER>/WebUntis/?school=<SCHULE>`. |
 | `UNTIS_USER` / `UNTIS_PASSWORD` | Dein normaler WebUntis-Login. |
 | `GITHUB_TOKEN` | Siehe Abschnitt 5. |
