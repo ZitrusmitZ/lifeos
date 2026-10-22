@@ -1,0 +1,31 @@
+[Unit]
+Description=LifeOS Telegram-Agent
+After=network-online.target ollama.service docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lifeos
+Group=lifeos
+WorkingDirectory=/opt/lifeos-agent
+EnvironmentFile=/etc/lifeos-agent/agent.env
+Environment=HOME=/var/lib/lifeos-agent
+Environment=PATH=/var/lib/lifeos-agent/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
+ExecStart=/usr/local/bin/node --disable-warning=ExperimentalWarning src/agent/main.ts
+Restart=on-failure
+RestartSec=10
+# Exit 2 = Konfiguration fehlt (Tokens) → nicht endlos neu starten
+RestartPreventExitStatus=2
+# Minecraft hat Vorrang
+MemoryMax=1G
+Nice=5
+CPUWeight=50
+# Härtung (kein NoNewPrivileges: sudo für den Root-Helfer braucht setuid)
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/lifeos-agent
+
+[Install]
+WantedBy=multi-user.target
