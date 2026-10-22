@@ -15,6 +15,8 @@ Environment=NODE_ENV=production
 ExecStart=/usr/local/bin/node --disable-warning=ExperimentalWarning src/agent/main.ts
 Restart=on-failure
 RestartSec=10
+# Exit 2 = Konfiguration fehlt (Tokens) → nicht endlos neu starten
+RestartPreventExitStatus=2
 # Minecraft hat Vorrang
 MemoryMax=1G
 Nice=5
