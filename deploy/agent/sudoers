@@ -1,0 +1,4 @@
+# LifeOS-Agent → /etc/sudoers.d/lifeos-agent (root:root 440, mit `visudo -cf` geprüft).
+# Kein generelles sudo: nur der Root-Helfer, der Verben und Namen selbst gegen /etc/lifeos-agent/helper.conf prüft.
+Defaults:lifeos !requiretty, env_reset
+lifeos ALL=(root) NOPASSWD: /usr/local/lib/lifeos-agent/helper

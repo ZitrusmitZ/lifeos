@@ -72,8 +72,8 @@ const schema = z.object({
 
   // ── Server-Tools ──────────────────────────────────────────────────
   /** Name:Art, Art = systemd | docker. Muss zu /etc/lifeos-agent/helper.conf passen (der Helfer prüft selbst nochmal). */
-  AGENT_SERVICES: list("ollama:systemd,tailscaled:systemd,playit:systemd,docker:systemd,lifeos:docker,minecraft:docker"),
-  AGENT_BACKUP_TARGETS: list("lifeos,minecraft"),
+  AGENT_SERVICES: list("ollama:systemd,tailscaled:systemd,playit:systemd,lifeos:docker,minecraft:docker"),
+  AGENT_BACKUP_TARGETS: list("lifeos,minecraft,offsite"),
   AGENT_GIT_PROJECTS: list("lifeos"),
   AGENT_HELPER: str("/usr/local/lib/lifeos-agent/helper"),
   AGENT_MINECRAFT_CONTAINER: str("minecraft"),
