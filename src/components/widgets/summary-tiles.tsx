@@ -1,5 +1,6 @@
 import {
   CalendarDays,
+  Cloud,
   CloudSun,
   GitBranch,
   GraduationCap,
@@ -12,6 +13,7 @@ import {
   Music,
   Newspaper,
   NotebookPen,
+  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -25,6 +27,8 @@ import {
   loadHealth,
   loadMailAssistant,
   loadNews,
+  loadNextcloud,
+  loadPihole,
   loadSettings,
   loadSpotify,
   loadUntis,
@@ -32,6 +36,7 @@ import {
 } from "@/integrations/loaders";
 import type { WidgetResult } from "@/integrations/core";
 import type { WidgetId } from "@/lib/dashboard";
+import { formatSize } from "@/lib/drive/policy";
 import { formatNote, formatPoints } from "@/lib/grades";
 import { examTile, lessonTile, weatherTile, type Tone } from "@/lib/hero";
 import { dayString, formatTime } from "@/lib/time";
@@ -190,6 +195,28 @@ const SUMMARIES: Record<WidgetId, () => Promise<Summary>> = {
       caption: `Ø ${formatPoints(p.average ?? 0)} P. bis ${semester}${p.under5 ? ` · ${p.under5}× unter 5` : ""}`,
       captionTone: p.under5 ? "critical" : "normal",
     };
+  },
+  async pihole() {
+    const r = await loadPihole();
+    return fromResult({ icon: ShieldCheck, color: "var(--cat-habits)", title: "Pi-hole" }, r, (p) => ({
+      value: p.blocking.enabled ? `${p.summary.percentBlocked.toLocaleString("de-DE")} %` : "Pause",
+      unit: p.blocking.enabled ? "geblockt" : undefined,
+      caption: p.blocking.enabled
+        ? `${n(p.summary.blocked)} von ${n(p.summary.queries)} Anfragen heute`
+        : p.blocking.timer
+          ? `Blocking aus · noch ${Math.ceil(p.blocking.timer / 60)} min`
+          : "Blocking aus, bis du es einschaltest",
+      tone: p.blocking.enabled ? "normal" : "warning",
+    }));
+  },
+  async cloud() {
+    const r = await loadNextcloud();
+    return fromResult({ icon: Cloud, color: "var(--cat-inbox)", title: "Nextcloud" }, r, (c) => ({
+      value: formatSize(c.quota.usedBytes),
+      unit: "belegt",
+      caption: c.info?.freeBytes != null ? `${formatSize(c.info.freeBytes)} frei auf der Platte` : c.recent[0] ? `Zuletzt: ${c.recent[0].name}` : "Noch keine Dateien",
+      tone: c.info?.freeBytes != null && c.info.freeBytes < 20 * 1024 ** 3 ? "warning" : "normal",
+    }));
   },
 };
 

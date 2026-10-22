@@ -16,6 +16,8 @@ import { github } from "./github";
 import { exams } from "./exams";
 import { google } from "./google";
 import { news } from "./news";
+import { nextcloud } from "./nextcloud";
+import { pihole } from "./pihole";
 import { spotify } from "./spotify";
 import { untis } from "./untis";
 import { weather, type Coords } from "./weather";
@@ -27,6 +29,8 @@ export const loadExams = cache(() => load(exams, undefined));
 export const loadGitHub = cache(() => load(github, undefined));
 export const loadSpotify = cache(() => load(spotify, undefined));
 export const loadNews = cache(() => load(news, undefined));
+export const loadPihole = cache(() => load(pihole, undefined));
+export const loadNextcloud = cache(() => load(nextcloud, undefined));
 
 export const LOCATION_COOKIE = "lifeos_loc";
 

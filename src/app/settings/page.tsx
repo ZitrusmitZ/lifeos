@@ -14,6 +14,8 @@ import { getSettings } from "@/lib/settings";
 import { PageHeader } from "@/components/page-header";
 import { WidgetSkeleton } from "@/components/widget-card";
 import { github } from "@/integrations/github";
+import { nextcloud } from "@/integrations/nextcloud";
+import { pihole } from "@/integrations/pihole";
 import { googleRedirectUri } from "@/integrations/google";
 import { spotifyRedirectUri } from "@/integrations/spotify";
 import { untis } from "@/integrations/untis";
@@ -95,6 +97,8 @@ async function SettingsContent({ searchParams }: { searchParams: Promise<Record<
   const simple = (missing: unknown): [State, string] => (demo ? ["ok", "Demo"] : missing ? ["off", "Nicht eingerichtet"] : ["ok", "Aktiv"]);
   const [uState, uStatus] = simple(untis.missingConfig());
   const [ghState, ghStatus] = simple(github.missingConfig());
+  const [phState, phStatus] = simple(pihole.missingConfig());
+  const [ncState, ncStatus] = simple(nextcloud.missingConfig());
   const ingestUrl = `${e.APP_URL}/api/ingest/health`;
 
   return (
@@ -106,6 +110,7 @@ async function SettingsContent({ searchParams }: { searchParams: Promise<Record<
           ["/rueckblick", "Wochenrückblick", "Gewohnheiten, Lernzeit, Schlaf und Noten der Woche"],
           ["/noten", "Noten", "Halbjahresnoten, Ziele und Abi-Hochrechnung"],
           ["/habits", "Erinnerungen", "Mitteilungen für Gewohnheiten"],
+          ["/server", "Server", "Pi-hole und Nextcloud: Status, Pausieren, Listen, Upload"],
         ].map(([href, label, hint]) => (
           <Link key={href} href={href} className="flex min-h-14 items-center gap-3 px-4 py-2 active:bg-muted">
             <span className="min-w-0 flex-1">
@@ -238,6 +243,24 @@ async function SettingsContent({ searchParams }: { searchParams: Promise<Record<
 
       <Row id="github" title="GitHub" description="Beiträge, zuletzt aktive Repos mit CI-Status und offene Pull Requests." state={ghState} status={ghStatus}>
         {ghState !== "ok" ? <p>Fine-grained Token (nur lesend) als <Code>GITHUB_TOKEN</Code> in die <Code>.env</Code>.</p> : null}
+      </Row>
+
+      <Row id="pihole" title="Pi-hole" description="Werbeblocker im Heimnetz: Statistik, Pausieren, eigene Freigaben und Sperren, Blocklisten aktualisieren." state={phState} status={phStatus}>
+        {phState !== "ok" ? (
+          <p>
+            In Pi-hole unter Einstellungen → Web-Oberfläche/API ein App-Passwort erzeugen, dann <Code>PIHOLE_URL</Code> (im Docker-Netz <Code>http://pihole</Code>),{" "}
+            <Code>PIHOLE_APP_PASSWORD</Code> und optional <Code>PIHOLE_PUBLIC_URL</Code> (Link zur Admin-Oberfläche) in die <Code>.env</Code>.
+          </p>
+        ) : null}
+      </Row>
+
+      <Row id="nextcloud" title="Nextcloud" description="Eigene Cloud auf dem Homeserver: Speicher, zuletzt geänderte Dateien und Upload aus LifeOS." state={ncState} status={ncStatus}>
+        {ncState !== "ok" ? (
+          <p>
+            App-Passwort mit <Code>occ user:auth-tokens:add &lt;nutzer&gt;</Code> erzeugen, dann <Code>NEXTCLOUD_URL</Code> (im Docker-Netz <Code>http://nextcloud</Code>),{" "}
+            <Code>NEXTCLOUD_USER</Code>, <Code>NEXTCLOUD_APP_PASSWORD</Code> und optional <Code>NEXTCLOUD_PUBLIC_URL</Code> in die <Code>.env</Code>.
+          </p>
+        ) : null}
       </Row>
 
       <Row

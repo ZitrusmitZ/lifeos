@@ -49,6 +49,7 @@ cd /opt/lifeos && sudo docker compose up -d --no-build
 | `GITHUB_TOKEN` | Siehe Abschnitt 5. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Siehe Abschnitt 3. |
 | `SPOTIFY_CLIENT_ID` | Siehe Abschnitt 4. |
+| `PIHOLE_*` / `NEXTCLOUD_*` | Siehe Abschnitt 5a. |
 
 Nach jeder Änderung: `sudo docker compose up -d --no-build` (startet den Container mit der neuen Konfiguration neu).
 
@@ -103,6 +104,32 @@ Manuell auslösen: Knopf „Jetzt sortieren“ im Widget oder `sudo systemctl st
    `https://github.com/settings/personal-access-tokens/new?name=LifeOS+Dashboard&target_name=<user>&expires_in=366&contents=read&pull_requests=read&statuses=read&actions=read`
 2. *Repository access*: **All repositories** (lässt sich nicht vorausfüllen; nötig, damit private Repos mit CI-Status erscheinen). Permissions: **Contents, Pull requests, Commit statuses, Actions** – jeweils Read-only (Metadata kommt automatisch).
 3. Token als `GITHUB_TOKEN` in die `.env`, dann `sudo docker compose up -d --no-build`.
+
+## 5a. Pi-hole & Nextcloud (Homeserver)
+
+Voraussetzung: Pi-hole und Nextcloud laufen per Docker Compose auf demselben Server (Container `pihole` und `nextcloud` im Netz `homeserver_default`). LifeOS spricht sie intern an – es werden keine Ports geöffnet.
+
+1. **LifeOS ins Netz hängen** – in `/opt/lifeos/compose.override.yaml` (lokal, nicht im Repo):
+   ```yaml
+   services:
+     lifeos:
+       networks: [default, homeserver]
+   networks:
+     homeserver:
+       external: true
+       name: homeserver_default
+   ```
+2. **Pi-hole-App-Passwort:** Pi-hole-Oberfläche → *Einstellungen* → *Web-Oberfläche/API* → *Erweitert* → **App-Passwort konfigurieren**, kopieren, *Speichern*. In die `.env`: `PIHOLE_URL=http://pihole`, `PIHOLE_APP_PASSWORD=…`.
+3. **Nextcloud-App-Passwort** (Admin-Nutzer, sonst fehlen Speicherangaben):
+   ```bash
+   cd ~/homeserver && sudo docker compose exec -u www-data nextcloud php occ user:auth-tokens:add <nutzer>
+   sudo docker compose exec -u www-data nextcloud php occ config:system:set trusted_domains 5 --value=nextcloud
+   ```
+   In die `.env`: `NEXTCLOUD_URL=http://nextcloud`, `NEXTCLOUD_USER=<nutzer>`, `NEXTCLOUD_APP_PASSWORD=…`.
+4. **HTTPS im Tailnet (optional, für Links):** `sudo tailscale serve --bg --https=8443 http://127.0.0.1:8080` und `sudo tailscale serve --bg --https=8444 http://127.0.0.1:8081`, dann `NEXTCLOUD_PUBLIC_URL=https://<host>.<tailnet>.ts.net:8443` und `PIHOLE_PUBLIC_URL=https://<host>.<tailnet>.ts.net:8444`. Nextcloud braucht dafür zusätzlich `trusted_domains` mit `<host>.<tailnet>.ts.net:8443`, `overwriteprotocol=https` und `trusted_proxies`.
+5. `cd /opt/lifeos && sudo docker compose up -d --no-build`. Unter *Einstellungen → Server* erscheinen Pi-hole und Nextcloud.
+
+**Agent:** Die Tools `pihole_*` und `nextcloud_status` laufen über `GET/POST /api/jobs/homeserver` mit `LIFEOS_CRON_TOKEN` – der Agent braucht keine eigenen Zugangsdaten. Für Status, Logs und Neustart der Container `pihole`, `nextcloud` und `nextcloud-db` in `/etc/lifeos-agent/helper.conf` bei `ALLOWED_DOCKER` und in `agent.env` bei `AGENT_SERVICES` ergänzen.
 
 ---
 

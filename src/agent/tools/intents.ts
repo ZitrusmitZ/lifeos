@@ -103,7 +103,43 @@ export function matchToolIntent(input: string, knownServices: string[], now: Dat
   const task = input.trim().match(/^(?:aufgabe|task)\s*:\s*([\s\S]+)$/i);
   if (task) return { tool: "run_task", params: { description: task[1] } };
 
+  const homeserver = matchHomeserverIntent(text);
+  if (homeserver) return homeserver;
+
   if (lower === "minecraft") return { tool: "minecraft_status", params: {} };
+  return null;
+}
+
+const PIHOLE = String.raw`(?:pi-?hole|werbeblocker|adblocker)`;
+const CLOUD = String.raw`(?:nextcloud|cloud)`;
+const MINUTES = String.raw`(?:\s+(?:für\s+)?(\d{1,4})\s*(?:min(?:uten)?|m)?)?`;
+const DOMAIN = String.raw`([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)`;
+
+/** Pi-hole und Nextcloud – „Pi-hole pausieren 10 min“, „Wie voll ist die Cloud?“, „Sperre ads.example.com“. */
+export function matchHomeserverIntent(text: string): ToolIntent | null {
+  const re = (src: string) => new RegExp(src, "i");
+  if (re(String.raw`^${PIHOLE}(?:[- ]?status)?$|^(?:läuft|ist) (?:der |das )?${PIHOLE}(?: an)?$`).test(text)) {
+    return { tool: "pihole_status", params: {} };
+  }
+  const pause =
+    text.match(re(String.raw`^${PIHOLE}\s+(?:pausieren|pause|aus(?:schalten)?)${MINUTES}$`)) ??
+    text.match(re(String.raw`^pausiere\s+(?:den |das )?${PIHOLE}${MINUTES}$`));
+  if (pause) return { tool: "pihole_pause", params: pause[1] ? { minutes: Math.min(Number(pause[1]), 1440) } : {} };
+  if (re(String.raw`^${PIHOLE}\s+(?:an|ein(?:schalten)?|fortsetzen|weiter)$|^schalte\s+(?:den |das )?${PIHOLE}\s+(?:wieder\s+)?(?:an|ein)$`).test(text)) {
+    return { tool: "pihole_resume", params: {} };
+  }
+  if (/^(?:blocklisten|gravity)\s+(?:aktualisieren|updaten|update|neu laden)$/i.test(text)) return { tool: "pihole_gravity", params: {} };
+
+  const deny = text.match(re(String.raw`^(?:${PIHOLE}\s+)?(?:sperre|blockiere|blocke)\s+(?:die\s+)?(?:domain\s+)?${DOMAIN}$`));
+  if (deny) return { tool: "pihole_domain", params: { op: "add", type: "deny", kind: "exact", domain: deny[1].toLowerCase() } };
+  const allow =
+    text.match(re(String.raw`^(?:${PIHOLE}\s+)?gib\s+(?:die\s+)?(?:domain\s+)?${DOMAIN}\s+frei$`)) ??
+    text.match(re(String.raw`^(?:${PIHOLE}\s+)?(?:erlaube|freigeben)\s+(?:die\s+)?(?:domain\s+)?${DOMAIN}$`));
+  if (allow) return { tool: "pihole_domain", params: { op: "add", type: "allow", kind: "exact", domain: allow[1].toLowerCase() } };
+
+  if (re(String.raw`^${CLOUD}(?:[- ]?status)?$|^wie voll ist (?:die |meine )?${CLOUD}$|^(?:speicher|platz) (?:in der |auf der )?${CLOUD}$`).test(text)) {
+    return { tool: "nextcloud_status", params: {} };
+  }
   return null;
 }
 
@@ -124,7 +160,8 @@ export async function pickToolWithLlm(local: Provider, model: string, text: stri
   const system =
     `Wähle für die Nachricht genau ein Tool oder keins. Antworte NUR mit JSON: {"tool":"<name>|null","params":{...}}.\n` +
     `Tools:\n${list}\nDienste: ${knownServices.join(", ")}.\n` +
-    `Parameter: calendar_events: {"offset" (Tage ab heute, 0–6),"days" (1–7)}, service_*: {"name"}, service_logs: {"name","n"}, backup_run: {"target"}, git_pull_project: {"name"}, minecraft_say: {"text"}, run_task: {"description"}.`;
+    `Parameter: calendar_events: {"offset" (Tage ab heute, 0–6),"days" (1–7)}, service_*: {"name"}, service_logs: {"name","n"}, backup_run: {"target"}, git_pull_project: {"name"}, minecraft_say: {"text"}, run_task: {"description"}, ` +
+    `pihole_pause: {"minutes"?}, pihole_domain: {"op":"add|remove","type":"allow|deny","kind":"exact|regex","domain"}.`;
   try {
     const res = await local.complete({ prompt: text.slice(0, 1000), system, model, json: true });
     const m = res.text.match(/\{[\s\S]*\}/);

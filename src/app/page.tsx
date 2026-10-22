@@ -13,6 +13,8 @@ import { HealthWidget } from "@/components/widgets/health-widget";
 import { InboxWidget } from "@/components/widgets/inbox-widget";
 import { MailAssistantWidget } from "@/components/widgets/mail-assistant-widget";
 import { NewsWidget } from "@/components/widgets/news-widget";
+import { NextcloudWidget } from "@/components/widgets/nextcloud-widget";
+import { PiholeWidget } from "@/components/widgets/pihole-widget";
 import { SchoolWidget } from "@/components/widgets/school-widget";
 import { SpotifyWidget } from "@/components/widgets/spotify-widget";
 import { loadSummary, type Summary } from "@/components/widgets/summary-tiles";
@@ -37,6 +39,8 @@ const FULL: Record<WidgetId, ComponentType> = {
   github: GitHubWidget,
   cards: CardsWidget,
   grades: GradesWidget,
+  pihole: PiholeWidget,
+  cloud: NextcloudWidget,
 };
 
 /** Sprungziele für die Tage-Kacheln */

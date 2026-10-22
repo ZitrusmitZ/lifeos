@@ -34,6 +34,8 @@ interface Integration<T, A = void> {
 | Weather (Open-Meteo + Nominatim for the place name) | 15 min | none |
 | News (RSS/Atom) | 20 min | none |
 | GitHub (one GraphQL query) | 10 min | fine-grained PAT |
+| Pi-hole v6 (summary, blocking, top blocked, own lists) | 1 min | app password → session ID, reused and renewed on 401 |
+| Nextcloud (status, serverinfo, quota, WebDAV SEARCH for recent files) | 5 min | app password (Basic auth) |
 | WebUntis | 15 min | username/password (`webuntis` package) |
 | Google (Calendar, Gmail, Drive) | 5 min | OAuth 2 web flow, offline access; write access only for calendar events and Gmail/Drive trash |
 | Spotify | 1 min | OAuth 2 + PKCE (no client secret) |
