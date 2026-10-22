@@ -14,6 +14,8 @@ export type CompletionRequest = {
   timeoutMs?: number;
   /** Zwischenstand (z. B. für „tippt…“) */
   onProgress?: () => void;
+  /** Connectors (Gmail, Kalender, Notion …) freigeben; Bestätigungen gehen an diesen Chat (nur Claude) */
+  connectorsChatId?: number;
 };
 
 export type CompletionResult = { text: string; model: string; durationMs: number; costUsd?: number };

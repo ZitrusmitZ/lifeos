@@ -142,6 +142,24 @@ sudo bash scripts/install_agent.sh   # idempotent: Node, user `lifeos`, Ollama +
 5. **Calendar (optional):** `LIFEOS_CRON_TOKEN` is copied from `/opt/lifeos/.env` by the install script; needs a LifeOS image that includes `/api/jobs/agent-briefing`.
 6. `sudo systemctl restart lifeos-agent` · logs: `journalctl -u lifeos-agent -f` (plus `/var/lib/lifeos-agent/logs/agent.log`) · health: `curl 127.0.0.1:8788/health`.
 
+### Connectors (Gmail, Calendar, Notion, Composio …)
+
+With `AGENT_CONNECTORS=true` Claude answers mail/calendar/Notion/app questions with the connectors (and synced plugins/skills) of your claude.ai account – in Telegram and in the web chat.
+
+```
+claude -p ─ connector tool call ─► --permission-prompt-tool mcp__lifeos_approve__approve
+                                     (src/agent/mcp/approve-server.ts, stdio MCP, started by the CLI)
+                                        │ read-only (search/get/list …) → allowed at once
+                                        └ anything else → approve.sock (0600, per-start token) → agent
+                                             → "✅ Ausführen / ✖️ Abbrechen" in the chat the request came from (5 min, then denied)
+```
+
+- **Auth:** connectors need a regular claude.ai login of the `lifeos` user (`claude auth login --claudeai`, browser OAuth); `setup-token` can't access connectors. With connectors on, the agent strips `CLAUDE_CODE_OAUTH_TOKEN` from the CLI environment so the stored login is used.
+- **Read vs. change** is decided by the first known verb in the tool name (`src/agent/mcp/classify.ts`); unknown → ask. Without the prompt tool the CLI would deny every connector call in `-p` mode, so nothing bypasses this path. Built-in tools stay off except `Skill` (loads instructions only).
+- Only messages about mail, calendar, Notion & co. (rule + local classification `apps`) use connectors – they load many tool definitions and cost quota. AI jobs (`KI:` reminders) may read connectors too.
+- Content from mails, pages and events is treated as data; the system prompt forbids following instructions from it, and every change still needs your tap.
+- Telegram updates: button taps are handled immediately, messages in the background – otherwise a request waiting for approval would block its own button.
+
 ### Web chat in the dashboard
 
 The same agent is also reachable from LifeOS itself – no Telegram needed. A floating chat button (bottom left, above the tab bar) opens the chat as a sheet on every page; `/agent` (header icon on desktop, "Alle Unterhaltungen" in the sheet) lists all past conversations grouped by day, searchable, swipe to delete, and lets you reopen and continue any of them.

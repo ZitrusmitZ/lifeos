@@ -63,6 +63,14 @@ const schema = z.object({
   CLAUDE_TIMEOUT_MS: num(300_000),
   /** Arbeitsverzeichnis für `run_task` */
   AGENT_TASK_DIR: str("/var/lib/lifeos-agent/workspace"),
+  /**
+   * claude.ai-Connectors (Gmail, Google Calendar, Notion, Composio, Canva …) für Claude-Antworten. Braucht einen
+   * normalen claude.ai-Login des Nutzers lifeos (`claude auth login`) – das setup-token wird dann nicht genutzt.
+   * Lesende Tools laufen sofort, ändernde erst nach „Ausführen“ im Chat.
+   */
+  AGENT_CONNECTORS: bool(false),
+  /** Gesamtzeit einer Anfrage mit Connectors (inkl. Warten auf Bestätigung) */
+  AGENT_CONNECTOR_TIMEOUT_MS: num(15 * 60_000),
 
   // ── API-Provider (vorbereitet, standardmäßig aus) ─────────────────
   ENABLE_API_PROVIDER: bool(false),

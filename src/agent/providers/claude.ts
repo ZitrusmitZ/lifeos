@@ -1,11 +1,16 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { createInterface } from "node:readline";
 import { addDays, localClock, zonedToEpoch } from "../../lib/time.ts";
 import { ProviderError, QuotaError, type CompletionRequest, type CompletionResult, type Provider } from "./types.ts";
 
 /**
  * Claude über das Pro-Abo – ausschließlich über die offizielle `claude`-CLI als Subprozess.
- * Auth macht die CLI selbst (`claude setup-token` → CLAUDE_CODE_OAUTH_TOKEN in der Service-Umgebung).
+ * Auth macht die CLI selbst: entweder `claude setup-token` → CLAUDE_CODE_OAUTH_TOKEN in der Service-Umgebung, oder –
+ * für die claude.ai-Connectors (Gmail, Kalender, Notion, Composio …) – ein normaler claude.ai-Login des Nutzers lifeos
+ * (`claude auth login`); dann wird das Token aus der Umgebung entfernt, damit die CLI den gespeicherten Login nimmt.
  * Dieser Code liest weder das Token noch ~/.claude/.credentials.json und spricht nie direkt mit der API.
  */
 
@@ -19,9 +24,11 @@ const STRIP_ENV = [
   "LIFEOS_CRON_TOKEN",
 ];
 
-export function claudeEnv(source: Record<string, string | undefined> = process.env): NodeJS.ProcessEnv {
+export function claudeEnv(source: Record<string, string | undefined> = process.env, opts: { storedLogin?: boolean } = {}): NodeJS.ProcessEnv {
   const env = { ...source } as NodeJS.ProcessEnv;
   for (const key of STRIP_ENV) delete env[key];
+  // setup-token kann keine Connectors – mit gespeichertem claude.ai-Login darf es den nicht überdecken
+  if (opts.storedLogin) delete env.CLAUDE_CODE_OAUTH_TOKEN;
   return env;
 }
 
@@ -32,11 +39,18 @@ export type ClaudeRunOptions = {
   permissionMode?: "default" | "plan" | "acceptEdits";
   maxTurns?: number;
   appendSystemPrompt?: string;
+  /**
+   * Connectors: MCP-Server aus dem claude.ai-Konto (kein --strict-mcp-config) plus der Freigabe-Server aus
+   * `mcpConfigFile`, über den jeder MCP-Aufruf läuft (`--permission-prompt-tool`).
+   */
+  connectors?: { mcpConfigFile: string; promptTool: string };
 };
 
 export function claudeArgs(o: ClaudeRunOptions): string[] {
   const tools = o.tools ?? [];
-  const args = ["-p", "--output-format", "stream-json", "--verbose", "--model", o.model, "--no-session-persistence", "--strict-mcp-config"];
+  const args = ["-p", "--output-format", "stream-json", "--verbose", "--model", o.model, "--no-session-persistence"];
+  if (o.connectors) args.push("--mcp-config", o.connectors.mcpConfigFile, "--permission-prompt-tool", o.connectors.promptTool);
+  else args.push("--strict-mcp-config");
   args.push("--tools", tools.join(","));
   if (tools.length) args.push("--allowedTools", ...tools);
   if (o.permissionMode) args.push("--permission-mode", o.permissionMode);
@@ -149,7 +163,41 @@ export type ClaudeProviderOptions = {
   spawnFn?: ClaudeSpawn;
   /** Rate-Limit-Ereignisse für /quota merken */
   onRateLimit?: (info: RateLimitInfo) => void;
+  /** Connectors aktiv: gespeicherter claude.ai-Login statt setup-token, Freigaben über den Agenten */
+  connectors?: ConnectorOptions;
 };
+
+export type ConnectorOptions = {
+  /** Ordner für die kurzlebigen MCP-Konfigurationen (0600) */
+  tmpDir: string;
+  /** Pfad zu `approve-server.ts` */
+  approveScript: string;
+  /** Freigabe-Socket + Token, sobald der Agent ihn gestartet hat */
+  endpoint: () => { socketPath: string; token: string } | null;
+  /** Gesamtlaufzeit inkl. Warten auf Luis' Klick */
+  timeoutMs: number;
+};
+
+export const APPROVE_SERVER = "lifeos_approve";
+export const APPROVE_PROMPT_TOOL = `mcp__${APPROVE_SERVER}__approve`;
+
+/** MCP-Konfiguration für den Freigabe-Server; als Datei (0600), damit der Token nicht in `ps` auftaucht. */
+export function writeApproveConfig(c: ConnectorOptions, endpoint: { socketPath: string; token: string }, chatId: number): string {
+  mkdirSync(c.tmpDir, { recursive: true, mode: 0o700 });
+  const file = path.join(c.tmpDir, `approve-${randomBytes(6).toString("hex")}.json`);
+  const config = {
+    mcpServers: {
+      [APPROVE_SERVER]: {
+        type: "stdio",
+        command: process.execPath,
+        args: ["--disable-warning=ExperimentalWarning", c.approveScript],
+        env: { LIFEOS_APPROVE_SOCKET: endpoint.socketPath, LIFEOS_APPROVE_TOKEN: endpoint.token, LIFEOS_APPROVE_CHAT: String(chatId) },
+      },
+    },
+  };
+  writeFileSync(file, JSON.stringify(config), { mode: 0o600 });
+  return file;
+}
 
 export class ClaudeProvider implements Provider {
   readonly name = "claude" as const;
@@ -170,7 +218,7 @@ export class ClaudeProvider implements Provider {
     const lines: string[] = [];
     try {
       const { code } = await (this.o.spawnFn ?? spawnClaude)(this.o.bin, ["auth", "status", "--json"], {
-        env: claudeEnv(),
+        env: claudeEnv(process.env, { storedLogin: Boolean(this.o.connectors) }),
         stdin: "",
         timeoutMs: 20_000,
         onLine: (l) => lines.push(l),
@@ -184,8 +232,29 @@ export class ClaudeProvider implements Provider {
     }
   }
 
-  complete(req: CompletionRequest): Promise<CompletionResult> {
-    return this.run(req.prompt, { model: req.model, appendSystemPrompt: req.system, maxTurns: this.o.maxTurns }, { timeoutMs: req.timeoutMs, onProgress: req.onProgress });
+  /** Können Anfragen dieses Chats gerade Connectors nutzen? */
+  connectorsReady(): boolean {
+    return Boolean(this.o.connectors?.endpoint());
+  }
+
+  async complete(req: CompletionRequest): Promise<CompletionResult> {
+    const base: ClaudeRunOptions = { model: req.model, appendSystemPrompt: req.system, maxTurns: this.o.maxTurns };
+    const c = this.o.connectors;
+    const endpoint = req.connectorsChatId !== undefined && c ? c.endpoint() : null;
+    if (!c || !endpoint || req.connectorsChatId === undefined) {
+      return this.run(req.prompt, base, { timeoutMs: req.timeoutMs, onProgress: req.onProgress });
+    }
+    const file = writeApproveConfig(c, endpoint, req.connectorsChatId);
+    try {
+      return await this.run(
+        req.prompt,
+        // Skill: Skills aus synchronisierten Plugins laden (nur Anweisungen); Bash/Dateien bleiben aus
+        { ...base, tools: ["Skill"], connectors: { mcpConfigFile: file, promptTool: APPROVE_PROMPT_TOOL } },
+        { timeoutMs: Math.max(req.timeoutMs ?? 0, c.timeoutMs), onProgress: req.onProgress },
+      );
+    } finally {
+      rmSync(file, { force: true });
+    }
   }
 
   /** Allgemeiner Aufruf (auch für `run_task` mit eingeschränkten Tools in festem Arbeitsverzeichnis). */
@@ -198,7 +267,8 @@ export class ClaudeProvider implements Provider {
     const lines: string[] = [];
     const { code, stderr } = await (this.o.spawnFn ?? spawnClaude)(this.o.bin, claudeArgs(opts), {
       cwd: extra.cwd,
-      env: claudeEnv(),
+      // MCP_TOOL_TIMEOUT: Connector-Aufrufe dürfen auf Luis' Freigabe warten (max. 5 Min)
+      env: { ...claudeEnv(process.env, { storedLogin: Boolean(this.o.connectors) }), ...(opts.connectors ? { MCP_TOOL_TIMEOUT: "360000" } : {}) },
       stdin: prompt,
       timeoutMs: extra.timeoutMs ?? this.o.timeoutMs,
       onLine: (line) => {

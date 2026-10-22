@@ -3,6 +3,7 @@ import { serviceMap } from "./config.ts";
 import { audit, claimPending, createPending, type ConfirmFlow } from "./confirm.ts";
 import type { AgentDB } from "./db.ts";
 import { log } from "./log.ts";
+import type { ApprovalBroker } from "./mcp/approvals.ts";
 import type { ClaudeProvider } from "./providers/claude.ts";
 import { QuotaError, type Provider } from "./providers/types.ts";
 import { bumpAttempt, clearQuota, finishQueued, lastRateLimit, markQuotaExhausted, quotaBlockedUntil, queuedTasks } from "./quota.ts";
@@ -13,7 +14,7 @@ import { createJob, deleteJob, getJob, listJobs, updateJob } from "./scheduler/s
 import type { Messenger, TgCallbackQuery, TgUpdate } from "./telegram/api.ts";
 import { escapeHtml, markdownToHtml } from "./telegram/format.ts";
 import { calendarContext, CALENDAR_MAX_DAYS, loadCalendar } from "./tools/calendar.ts";
-import { looksLikeSchedule, matchToolIntent, mentionsCalendar, pickToolWithLlm } from "./tools/intents.ts";
+import { looksLikeSchedule, matchToolIntent, mentionsApps, mentionsCalendar, pickToolWithLlm } from "./tools/intents.ts";
 import { formatSystemStatus, readSystemStatus } from "./tools/system.ts";
 import { webChatId } from "./web/messenger.ts";
 import { formatTime, relativeTime, today } from "../lib/time.ts";
@@ -81,6 +82,8 @@ export type GatewayDeps = {
   confirm: ConfirmFlow;
   local: Provider;
   claude: ClaudeProvider;
+  /** Freigaben für Connector-Aktionen (nur mit AGENT_CONNECTORS) */
+  approvals?: ApprovalBroker;
   now?: () => number;
   /** für Tests (Kalender über LifeOS) */
   fetch?: typeof fetch;
@@ -139,6 +142,7 @@ export class Gateway {
   async handleWebAction(data: string): Promise<void> {
     if (data.startsWith("c:")) return this.d.confirm.onCallback(data, "");
     if (data.startsWith("j:")) return this.onJobCallback(data, "");
+    if (data.startsWith("a:")) return this.d.approvals?.onCallback(data, "");
   }
 
   private async process(chatId: number, text: string): Promise<void> {
@@ -164,6 +168,7 @@ export class Gateway {
     const data = q.data ?? "";
     if (data.startsWith("c:")) return this.d.confirm.onCallback(data, q.id);
     if (data.startsWith("j:")) return this.onJobCallback(data, q.id);
+    if (data.startsWith("a:") && this.d.approvals) return this.d.approvals.onCallback(data, q.id);
     await this.d.tg.answerCallback(q.id, "Unbekannt");
   }
 
@@ -190,10 +195,17 @@ export class Gateway {
           return await this.d.confirm.request(chatId, picked.tool, picked.params);
         }
       }
-      // Server-Fragen ohne passendes Tool: aktuelle Messwerte als Daten mitgeben
+      // Mail, Kalender, Notion …: Claude mit Connectors (mindestens „simple“ – das lokale Modell hat keine Tools)
+      const connectors = this.d.claude.connectorsReady() && (c.category === "apps" || mentionsApps(text));
+      // Server-Fragen ohne passendes Tool: aktuelle Messwerte als Daten mitgeben; Kalender nur ohne Connectors
       const context =
-        c.category === "server" ? formatSystemStatus(await readSystemStatus()) : mentionsCalendar(text) ? await this.calendarData() : undefined;
-      const answer = await this.d.router.answer(chatId, text, c, reason, { context });
+        c.category === "server"
+          ? formatSystemStatus(await readSystemStatus())
+          : !connectors && mentionsCalendar(text)
+            ? await this.calendarData()
+            : undefined;
+      const cls = connectors && c.complexity === "trivial" ? { ...c, complexity: "simple" as const } : c;
+      const answer = await this.d.router.answer(chatId, text, cls, connectors ? `${reason}; Connectors` : reason, { context, connectors });
       const body = answer.decision.provider === "local" || answer.queuedId ? escapeHtml(answer.text) : markdownToHtml(answer.text);
       await this.d.tg.send(chatId, answer.notice ? `${body}\n\n<i>${escapeHtml(answer.notice)}</i>` : body);
     } finally {

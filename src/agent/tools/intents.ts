@@ -45,6 +45,14 @@ export function matchCalendarIntent(input: string, now: Date = new Date(), tz?: 
 }
 
 /** Freie Fragen mit Kalender-Bezug → Termine als Daten mitgeben („Wann ist mein Zahnarzttermin?“). */
+/** Fragen, für die Claude Luis' verbundene Dienste braucht (Mail, Kalender, Notion, Composio …). */
+export function mentionsApps(text: string): boolean {
+  return (
+    mentionsCalendar(text) ||
+    /\b(?:e-?mails?|mails?|gmail|posteingang|inbox|entwurf|entwürfe|notion|composio|canva|booking|hotel|unterkunft|slack|kontakt(?:e)?)\b/i.test(text)
+  );
+}
+
 export function mentionsCalendar(text: string): boolean {
   return /termin|kalender|\bhabe? ich\b.*\b(?:vor|frei|zeit)\b|\bwann (?:ist|hab|habe) (?:ich|mein)|\bwas steht\b.*\ban\b/i.test(text);
 }

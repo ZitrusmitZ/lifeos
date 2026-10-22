@@ -37,7 +37,7 @@ export type WebServerDeps = {
 };
 
 const textSchema = z.object({ text: z.string().trim().min(1).max(MAX_TEXT) });
-const actionSchema = z.object({ data: z.string().regex(/^[cj]:[0-9a-f]{12}:[yn]$/) });
+const actionSchema = z.object({ data: z.string().regex(/^[cja]:[0-9a-f]{12}:[yn]$/) });
 
 const digest = (s: string) => createHash("sha256").update(s).digest();
 
