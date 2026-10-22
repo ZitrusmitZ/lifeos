@@ -15,6 +15,7 @@ import { Router } from "./router.ts";
 import { seedDefaultJobs, Scheduler, type Job } from "./scheduler/scheduler.ts";
 import { TelegramApi } from "./telegram/api.ts";
 import { escapeHtml, markdownToHtml } from "./telegram/format.ts";
+import { ApprovalBroker, startApprovalServer, type ApprovalEndpoint } from "./mcp/approvals.ts";
 import { execRunner } from "./tools/exec.ts";
 import { ChannelMessenger, pushChatId, WebMessenger } from "./web/messenger.ts";
 import { startWebServer } from "./web/server.ts";
@@ -46,12 +47,21 @@ async function main(): Promise<void> {
   const state: State = { lastPollAt: 0, startedAt: Date.now(), ollama: false, claude: false, stopping: false, telegram: telegramOn, web: false };
 
   const local = new OllamaProvider(cfg.OLLAMA_URL, cfg.OLLAMA_TIMEOUT_MS);
+  let approvalEndpoint: ApprovalEndpoint | null = null;
   const claude = new ClaudeProvider({
     bin: cfg.CLAUDE_BIN,
     tz: cfg.AGENT_TZ,
     timeoutMs: cfg.CLAUDE_TIMEOUT_MS,
     maxTurns: cfg.CLAUDE_MAX_TURNS,
     onRateLimit: (info) => rememberRateLimit(db, info),
+    connectors: cfg.AGENT_CONNECTORS
+      ? {
+          tmpDir: path.join(cfg.AGENT_DATA_DIR, "tmp"),
+          approveScript: path.join(import.meta.dirname, "mcp", "approve-server.ts"),
+          endpoint: () => approvalEndpoint,
+          timeoutMs: cfg.AGENT_CONNECTOR_TIMEOUT_MS,
+        }
+      : undefined,
   });
   const api = new ApiProvider(db, {
     enabled: cfg.ENABLE_API_PROVIDER,
@@ -73,7 +83,15 @@ async function main(): Promise<void> {
   });
   const toolCtx = { cfg, run: execRunner, dryRun: cfg.AGENT_DRY_RUN, claude };
   const confirm = new ConfirmFlow(db, tg, toolCtx);
-  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude });
+  const approvals = cfg.AGENT_CONNECTORS ? new ApprovalBroker(db, tg) : undefined;
+  if (approvals) {
+    approvalEndpoint = await startApprovalServer(path.join(cfg.AGENT_DATA_DIR, "approve.sock"), approvals).catch((err) => {
+      log.warn("approve", `Freigabe-Socket nicht gestartet – Connectors aus: ${(err as Error).message}`);
+      return null;
+    });
+  }
+  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, approvals });
+  if (approvalEndpoint) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
   const sampler = new MemSampler();
 
   // ── Startprüfungen ──────────────────────────────────────────────
@@ -84,7 +102,12 @@ async function main(): Promise<void> {
   seedDefaultJobs(db, cfg, cfg.AGENT_TZ);
   await telegram?.setCommands(COMMANDS).catch((err) => log.warn("telegram", `setMyCommands: ${(err as Error).message}`));
   const warnings = [
-    !auth.loggedIn ? "⚠️ Claude-CLI nicht eingeloggt – nur lokaler Modus. Fix: <code>sudo -iu lifeos claude setup-token</code>, Token in agent.env." : null,
+    !auth.loggedIn
+      ? cfg.AGENT_CONNECTORS
+        ? "⚠️ Claude-CLI nicht eingeloggt – nur lokaler Modus. Connectors brauchen den claude.ai-Login: <code>sudo -u lifeos -H claude auth login</code>."
+        : "⚠️ Claude-CLI nicht eingeloggt – nur lokaler Modus. Fix: <code>sudo -iu lifeos claude setup-token</code>, Token in agent.env."
+      : null,
+    cfg.AGENT_CONNECTORS && !approvalEndpoint ? "⚠️ Connectors aktiviert, aber der Freigabe-Socket läuft nicht – Connectors aus." : null,
     !state.ollama ? `⚠️ Ollama bzw. Modell <code>${escapeHtml(cfg.OLLAMA_MODEL)}</code> nicht verfügbar – Klassifikation fällt auf „complex“ zurück.` : null,
     cfg.AGENT_DRY_RUN ? "🧪 Dry-Run: ändernde Aktionen werden nur simuliert." : null,
   ].filter(Boolean);
@@ -113,7 +136,10 @@ async function main(): Promise<void> {
     prompt: async (job: Job) => {
       const text = String(job.payload.text ?? "");
       const complexity = (["trivial", "simple", "complex", "hard"] as const).find((c) => c === job.payload.complexity) ?? "simple";
-      const answer = await router.answer(chatId, text, { complexity, needs_tools: false, category: "knowledge" }, `Job ${job.id} (${job.name})`);
+      // KI-Jobs dürfen Connectors lesen („fass meine ungelesenen Mails zusammen“); Änderungen brauchen weiter den Button
+      const answer = await router.answer(chatId, text, { complexity, needs_tools: false, category: "knowledge" }, `Job ${job.id} (${job.name})`, {
+        connectors: claude.connectorsReady(),
+      });
       const body = answer.decision.provider === "local" ? escapeHtml(answer.text) : markdownToHtml(answer.text);
       await tg.send(chatId, `🗓 <b>${escapeHtml(job.name)}</b>\n${body}${answer.notice ? `\n\n<i>${escapeHtml(answer.notice)}</i>` : ""}`);
     },
@@ -163,6 +189,7 @@ async function main(): Promise<void> {
     clearInterval(tickTimer);
     server?.close();
     webServer?.close();
+    approvalEndpoint?.server.close();
     setTimeout(() => {
       db.close();
       process.exit(0);
@@ -185,7 +212,10 @@ async function pollLoop(tg: TelegramApi, gateway: Gateway, db: AgentDB, state: S
       for (const u of updates) {
         offset = u.update_id + 1;
         setKv(db, "tg_offset", String(offset)); // vor der Verarbeitung: ein Absturz führt eine Aktion nie zweimal aus
-        await gateway.handleUpdate(u);
+        // Buttons sofort, Nachrichten im Hintergrund: eine Claude-Anfrage kann auf eine Freigabe warten,
+        // deren Button-Klick sonst hinter ihr in der Schlange stünde
+        if (u.callback_query) await gateway.handleUpdate(u);
+        else void gateway.handleUpdate(u).catch((err) => log.error("gateway", (err as Error).message));
       }
     } catch (err) {
       log.warn("telegram", `Polling: ${(err as Error).message}`);
