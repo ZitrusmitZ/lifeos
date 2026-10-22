@@ -14,15 +14,44 @@ permissions:
   contents: read
   packages: write
 
-concurrency:
-  group: release
-  cancel-in-progress: true
-
 jobs:
-  image:
+  # Ist der geprüfte Commit noch der Stand von main? Enden zwei CI-Läufe in vertauschter Reihenfolge,
+  # darf das ältere Release `latest` nicht überschreiben – der neuere Commit bekommt sein eigenes Release.
+  # Bewusst ein eigener Job ohne concurrency: GitHub hält pro Gruppe nur einen wartenden Lauf und
+  # verwirft den bisherigen, wenn ein neuer dazukommt – ein veralteter Lauf darf also gar nicht erst einreihen.
+  current:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          # workflow_dispatch baut github.sha wie gewünscht, ohne Abgleich
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [ "$main" = "$HEAD_SHA" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$HEAD_SHA ist nicht mehr main ($main) – kein Release, der neuere Commit bringt sein eigenes"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  image:
+    needs: current
+    if: needs.current.outputs.build == 'true'
+    # nie abbrechen: ein laufender Build ist der bisher neueste Stand; ein neuerer wartet und überschreibt danach
+    concurrency:
+      group: release
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
