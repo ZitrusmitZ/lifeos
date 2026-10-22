@@ -6,7 +6,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { AgentChatButton } from "@/components/agent-chat";
 import { FocusDock } from "@/components/focus/focus-dock";
-import { AgentLink, BottomNav, Nav, SettingsLink } from "@/components/nav";
+import { AgentLink, BottomNav, FilesLink, Nav, SettingsLink } from "@/components/nav";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { themeScript } from "@/components/theme";
 import { isDemo } from "@/lib/env";
@@ -64,6 +64,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Suspense>
                 <UserBadge />
               </Suspense>
+              <FilesLink />
               <AgentLink />
               <SettingsLink />
             </div>

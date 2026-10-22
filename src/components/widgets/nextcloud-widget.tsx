@@ -7,7 +7,7 @@ import { ResultView, WidgetCard } from "../widget-card";
 export async function NextcloudWidget({ className }: { className?: string }) {
   const result = await loadNextcloud();
   return (
-    <WidgetCard title="Nextcloud" href="/server#nextcloud" hrefLabel="Server" className={className}>
+    <WidgetCard title="Nextcloud" href="/dateien" hrefLabel="Dateien" className={className}>
       <ResultView result={result} integration="nextcloud">
         {(c) => {
           const free = c.info?.freeBytes ?? null;

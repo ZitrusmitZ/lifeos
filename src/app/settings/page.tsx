@@ -110,7 +110,8 @@ async function SettingsContent({ searchParams }: { searchParams: Promise<Record<
           ["/rueckblick", "Wochenrückblick", "Gewohnheiten, Lernzeit, Schlaf und Noten der Woche"],
           ["/noten", "Noten", "Halbjahresnoten, Ziele und Abi-Hochrechnung"],
           ["/habits", "Erinnerungen", "Mitteilungen für Gewohnheiten"],
-          ["/server", "Server", "Pi-hole und Nextcloud: Status, Pausieren, Listen, Upload"],
+          ["/dateien", "Dateien", "Nextcloud: hochladen per Drag & Drop, ordnen, Links teilen"],
+          ["/server", "Server", "Pi-hole und Nextcloud: Status, Pausieren, Listen"],
         ].map(([href, label, hint]) => (
           <Link key={href} href={href} className="flex min-h-14 items-center gap-3 px-4 py-2 active:bg-muted">
             <span className="min-w-0 flex-1">

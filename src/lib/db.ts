@@ -312,6 +312,30 @@ const MIGRATIONS: string[] = [
     pushed_at  INTEGER
   );
   `,
+  `
+  -- Dateien: eigene Freigabe-Links (/d/<token>, öffentlich über Tailscale Funnel) und laufende Chunk-Uploads
+  CREATE TABLE file_shares (
+    token            TEXT PRIMARY KEY,
+    path             TEXT NOT NULL,
+    file_id          INTEGER,
+    name             TEXT NOT NULL,
+    size             INTEGER NOT NULL,
+    content_type     TEXT,
+    created_at       INTEGER NOT NULL,
+    expires_at       INTEGER,
+    password_hash    TEXT,
+    downloads        INTEGER NOT NULL DEFAULT 0,
+    last_download_at INTEGER,
+    revoked_at       INTEGER
+  );
+  CREATE INDEX file_shares_created ON file_shares (created_at);
+  CREATE TABLE file_uploads (
+    id         TEXT PRIMARY KEY,
+    path       TEXT NOT NULL,
+    size       INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export type DB = DatabaseSync;

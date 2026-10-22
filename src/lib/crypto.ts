@@ -1,5 +1,5 @@
 import "server-only";
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { env } from "./env";
 
 /** AES-256-GCM für OAuth-Tokens in der Datenbank. Format: base64(iv).base64(tag).base64(ciphertext) */
@@ -43,4 +43,23 @@ export function randomToken(bytes = 32): string {
 
 export function pkceChallenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
+}
+
+/** HMAC-SHA256 mit dem App-Schlüssel (base64url) – z. B. für Freischalt-Cookies passwortgeschützter Links. */
+export function sign(value: string): string {
+  return createHmac("sha256", key()).update(value).digest("base64url");
+}
+
+/** Passwort-Hash für Freigabe-Links: `scrypt$<salt>$<hash>` (base64url). */
+export function hashPassword(password: string): string {
+  const salt = randomBytes(16);
+  return `scrypt$${salt.toString("base64url")}$${scryptSync(password.normalize("NFC"), salt, 32).toString("base64url")}`;
+}
+
+export function verifyPassword(password: string, stored: string): boolean {
+  const [scheme, salt, hash] = stored.split("$");
+  if (scheme !== "scrypt" || !salt || !hash) return false;
+  const expected = Buffer.from(hash, "base64url");
+  const actual = scryptSync(password.normalize("NFC"), Buffer.from(salt, "base64url"), expected.length);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }

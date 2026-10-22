@@ -3,7 +3,7 @@ import { escapeHtml } from "../telegram/format.ts";
 import type { Tool, ToolCtx } from "./registry.ts";
 
 /**
- * Pi-hole und Nextcloud über LifeOS (`/api/jobs/homeserver`, Bearer `LIFEOS_CRON_TOKEN`). Die Zugangsdaten zu
+ * Pi-hole und Nextcloud (Status, Dateien, Freigabe-Links) über LifeOS (`/api/jobs/homeserver`, Bearer `LIFEOS_CRON_TOKEN`). Die Zugangsdaten zu
  * Pi-hole/Nextcloud liegen nur im LifeOS-Container; der Agent kennt nur diesen einen Endpunkt.
  * Ändernde Tools laufen erst nach dem Bestätigungs-Button, im Dry-Run gar nicht.
  */
@@ -104,6 +104,21 @@ export function formatNextcloud(s: HomeserverStatus["nextcloud"]): string {
   return lines.join("\n");
 }
 
+type FileEntry = { name: string; path: string; size: number; modifiedAt: string; isDir: boolean };
+
+/** Lesende Datei-Abfrage über dieselbe POST-Schnittstelle (liefert Daten, ändert nichts). */
+const query = <T>(ctx: ToolCtx, action: Record<string, unknown>) =>
+  call<T>(ctx, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
+
+export function formatEntries(entries: FileEntry[], heading: string, total = entries.length): string {
+  if (!entries.length) return `${heading}\n(leer)`;
+  const lines = entries.map((e) => (e.isDir ? `📁 ${escapeHtml(e.name)}` : `📄 ${escapeHtml(e.name)} · ${formatBytes(e.size)} · <code>${escapeHtml(e.path)}</code>`));
+  if (total > entries.length) lines.push(`… und ${total - entries.length} weitere`);
+  return [heading, ...lines].join("\n");
+}
+
+const EXPIRY_TEXT = { "1d": "1 Tag", "7d": "7 Tage", "30d": "30 Tage", never: "ohne Ablauf" } as const;
+
 const defineTool = <P>(t: Tool<P>): Tool<P> => t;
 
 const domainParams = z.object({
@@ -132,6 +147,40 @@ export const HOMESERVER_TOOLS = [
     preview: () => "Nextcloud-Status lesen",
     async run(_p, ctx) {
       return formatNextcloud((await loadHomeserver(ctx)).nextcloud);
+    },
+  }),
+  defineTool({
+    name: "nextcloud_list",
+    kind: "read",
+    description: "Nextcloud: Inhalt eines Ordners auflisten (path, z. B. \"/01 Schule/Q1 (11-1)/Mathematik LK\"; leer = Hauptordner)",
+    params: z.object({ path: z.string().max(4000).default("/") }),
+    preview: (p) => `Ordner <code>${escapeHtml(p.path)}</code> auflisten`,
+    async run(p, ctx) {
+      const r = await query<{ path: string; entries: FileEntry[]; total: number }>(ctx, { action: "nextcloud.list", path: p.path });
+      return formatEntries(r.entries, `☁️ <b>${escapeHtml(r.path)}</b>`, r.total);
+    },
+  }),
+  defineTool({
+    name: "nextcloud_search",
+    kind: "read",
+    description: "Nextcloud: Dateien und Ordner nach Namen suchen (query, mind. 2 Zeichen) – liefert die Pfade für nextcloud_share",
+    params: z.object({ query: z.string().trim().min(2).max(100) }),
+    preview: (p) => `Nextcloud nach „${escapeHtml(p.query)}“ durchsuchen`,
+    async run(p, ctx) {
+      const r = await query<{ entries: FileEntry[] }>(ctx, { action: "nextcloud.search", query: p.query });
+      return formatEntries(r.entries, `🔎 Treffer für „${escapeHtml(p.query)}“`);
+    },
+  }),
+  defineTool({
+    name: "nextcloud_share",
+    kind: "change",
+    description: "Freigabe-Link für eine Nextcloud-Datei erstellen (path aus nextcloud_search/list; expiry 1d|7d|30d|never, Standard 7d). Der Link ist öffentlich.",
+    params: z.object({ path: z.string().min(1).max(4000), expiry: z.enum(["1d", "7d", "30d", "never"]).default("7d") }),
+    preview: (p) => `Öffentlichen Link für <code>${escapeHtml(p.path)}</code> erstellen (${EXPIRY_TEXT[p.expiry]}). Wer den Link hat, kann die Datei herunterladen.`,
+    async run(p, ctx) {
+      if (ctx.dryRun) return `🧪 Dry-Run – nicht ausgeführt: Link für <code>${escapeHtml(p.path)}</code>`;
+      const r = await query<{ message: string; url: string }>(ctx, { action: "nextcloud.share", path: p.path, expiry: p.expiry });
+      return `🔗 ${escapeHtml(r.message)}\n${escapeHtml(r.url)}`;
     },
   }),
   defineTool({
