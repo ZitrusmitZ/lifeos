@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Provider } from "../providers/types.ts";
 import { TOOLS } from "./registry.ts";
+import { today } from "../../lib/time.ts";
 
 /**
  * Stufe 1 des Routers: deterministische Regeln für häufige Server-Anfragen – kostenlos, sofort, ohne LLM.
@@ -11,9 +12,49 @@ export type ToolIntent = { tool: string; params: Record<string, unknown> };
 
 const ART = String.raw`(?:den |die |das )?`;
 
-export function matchToolIntent(input: string, knownServices: string[]): ToolIntent | null {
+const WEEKDAYS = ["sonntag", "montag", "dienstag", "mittwoch", "donnerstag", "freitag", "samstag"];
+const RANGE = String.raw`(heute|morgen|übermorgen|(?:diese|die|der) woche|woche|nächsten (?:7|sieben) tage|(?:am |für |nächsten )?(?:${WEEKDAYS.join("|")}))`;
+
+/** „heute“, „morgen“, „diese Woche“, „am Freitag“ → Tage ab heute; unbekannt → null. */
+export function calendarRange(phrase: string | undefined, now: Date = new Date(), tz?: string): { offset: number; days: number } | null {
+  const p = (phrase ?? "").toLowerCase().trim();
+  if (!p) return null;
+  if (p === "heute") return { offset: 0, days: 1 };
+  if (p === "morgen") return { offset: 1, days: 1 };
+  if (p === "übermorgen") return { offset: 2, days: 1 };
+  if (/woche|tage/.test(p)) return { offset: 0, days: 7 };
+  const wd = WEEKDAYS.findIndex((w) => p.endsWith(w));
+  if (wd < 0) return null;
+  const todayWd = new Date(`${today(tz, now)}T12:00:00Z`).getUTCDay();
+  return { offset: (wd - todayWd + 7) % 7, days: 1 };
+}
+
+/** Kurze Kalender-Abfragen („Termine morgen“, „Was hab ich heute vor?“, „Kalender“) – ohne LLM. */
+export function matchCalendarIntent(input: string, now: Date = new Date(), tz?: string): ToolIntent | null {
+  const text = input.trim().replace(/[.!?]+$/, "").replace(/\s+/g, " ");
+  const list = text.match(new RegExp(String.raw`^(?:zeig(?:e)? (?:mir )?)?(?:meine |die )?(?:termine|kalender)(?: (?:für |von )?${RANGE})?$`, "i"));
+  const what =
+    text.match(new RegExp(String.raw`^was (?:hab|habe) ich ${RANGE}(?: so)?(?: (?:vor|an|für termine))?$`, "i")) ??
+    text.match(new RegExp(String.raw`^(?:habe?|hab) ich ${RANGE} (?:was|etwas|termine) vor$`, "i")) ??
+    text.match(new RegExp(String.raw`^was steht ${RANGE} an$`, "i")) ??
+    text.match(new RegExp(String.raw`^${RANGE} termine$`, "i"));
+  const m = list ?? what;
+  if (!m) return null;
+  const range = calendarRange(m[1], now, tz) ?? (list ? { offset: 0, days: 7 } : { offset: 0, days: 1 });
+  return { tool: "calendar_events", params: range };
+}
+
+/** Freie Fragen mit Kalender-Bezug → Termine als Daten mitgeben („Wann ist mein Zahnarzttermin?“). */
+export function mentionsCalendar(text: string): boolean {
+  return /termin|kalender|\bhabe? ich\b.*\b(?:vor|frei|zeit)\b|\bwann (?:ist|hab|habe) (?:ich|mein)|\bwas steht\b.*\ban\b/i.test(text);
+}
+
+export function matchToolIntent(input: string, knownServices: string[], now: Date = new Date(), tz?: string): ToolIntent | null {
   const text = input.trim().replace(/[.!?]+$/, "");
   const lower = text.toLowerCase();
+
+  const calendar = matchCalendarIntent(text, now, tz);
+  if (calendar) return calendar;
 
   if (/^(status|server[- ]?status|serverstatus|wie geht'?s dem server|systemstatus)$/i.test(text)) return { tool: "system_status", params: {} };
 
@@ -75,7 +116,7 @@ export async function pickToolWithLlm(local: Provider, model: string, text: stri
   const system =
     `Wähle für die Nachricht genau ein Tool oder keins. Antworte NUR mit JSON: {"tool":"<name>|null","params":{...}}.\n` +
     `Tools:\n${list}\nDienste: ${knownServices.join(", ")}.\n` +
-    `Parameter: service_*: {"name"}, service_logs: {"name","n"}, backup_run: {"target"}, git_pull_project: {"name"}, minecraft_say: {"text"}, run_task: {"description"}.`;
+    `Parameter: calendar_events: {"offset" (Tage ab heute, 0–6),"days" (1–7)}, service_*: {"name"}, service_logs: {"name","n"}, backup_run: {"target"}, git_pull_project: {"name"}, minecraft_say: {"text"}, run_task: {"description"}.`;
   try {
     const res = await local.complete({ prompt: text.slice(0, 1000), system, model, json: true });
     const m = res.text.match(/\{[\s\S]*\}/);

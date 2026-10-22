@@ -123,6 +123,7 @@ Scheduler (agent.db, Europe/Berlin) ──► Telegram
 | Tool | Confirmation |
 |---|---|
 | `system_status`, `service_status`, `service_logs` (≤ 100 lines), `minecraft_status` | no |
+| `calendar_events` – Google Calendar, read-only, today up to 7 days ahead (via `GET /api/jobs/agent-briefing?days=N`) | no |
 | `service_restart`, `minecraft_say`, `minecraft_restart`, `backup_run`, `git_pull_project` | **yes** – exact command in the preview |
 | `run_task` – delegates to `claude -p` with `Read/Glob/Grep/Edit/Write` (no shell) in `/var/lib/lifeos-agent/workspace` | **yes** – with Claude's plan as preview |
 
@@ -158,7 +159,9 @@ Browser ─► /api/agent/* (proxy.ts: Tailscale identity + origin check)
 
 `node src/agent/main.ts --dry-run` (or `AGENT_DRY_RUN=true`) runs the full bot but only simulates changing tools.
 
-**Commands:** `/status` · `/jobs` · `/job_add jeden Freitag um 16 Uhr an Wäsche` or `/job_add 0 16 * * 5 | Wäsche` · `/job_edit <id> <cron or "Mo–Do um 17:30"> | <text>` · `/job_del <id>` · `/model` · `/quota` · `/help`. Free text like "Erinner mich jeden Freitag um 16 Uhr an X" proposes `0 16 * * 5 – Freitags 16:00 – „X“` with buttons and is saved only after confirmation. Prefix the reminder text with `KI:` to have it generated through the router at run time.
+**Calendar in chat:** "Termine morgen", "Was hab ich heute vor?", "Termine am Freitag", "Kalender" or `/termine` list events without any model. Free questions that mention appointments ("Wann ist mein Zahnarzttermin?", "Hab ich Freitag Zeit?") get the next 7 days passed to the model as data. Google only returns events from now on, so earlier events of today are missing.
+
+**Commands:** `/status` · `/termine` · `/jobs` · `/job_add jeden Freitag um 16 Uhr an Wäsche` or `/job_add 0 16 * * 5 | Wäsche` · `/job_edit <id> <cron or "Mo–Do um 17:30"> | <text>` · `/job_del <id>` · `/model` · `/quota` · `/help`. Free text like "Erinner mich jeden Freitag um 16 Uhr an X" proposes `0 16 * * 5 – Freitags 16:00 – „X“` with buttons and is saved only after confirmation. Prefix the reminder text with `KI:` to have it generated through the router at run time.
 
 **Config** lives in `/etc/lifeos-agent/agent.env` (template: [`deploy/agent/agent.env.example`](deploy/agent/agent.env.example)): model aliases (`CLAUDE_MODEL_SIMPLE/COMPLEX/HARD`, `OLLAMA_MODEL`), service/backup/project whitelists (must match `helper.conf`), health thresholds, job switches, `ENABLE_API_PROVIDER=false` (if enabled later: own API key, monthly budget and per-token prices required, cost logged per call).
 

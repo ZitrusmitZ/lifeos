@@ -4,8 +4,10 @@ import type { AgentConfig, ServiceKind } from "../config.ts";
 import { serviceMap } from "../config.ts";
 import type { ClaudeProvider } from "../providers/claude.ts";
 import { escapeHtml } from "../telegram/format.ts";
+import { formatCalendar, loadCalendar } from "./calendar.ts";
 import { describeCommand, helperCommand, SAFE_NAME, tail, type Runner } from "./exec.ts";
 import { formatSystemStatus, readSystemStatus } from "./system.ts";
+import { today } from "../../lib/time.ts";
 
 /**
  * Alle Server-Tools als feste Funktionen mit typisierten Parametern. Neue Tools nur hier im Code –
@@ -19,6 +21,8 @@ export type ToolCtx = {
   run: Runner;
   dryRun: boolean;
   claude?: ClaudeProvider;
+  /** für Tests (Kalender über LifeOS) */
+  fetch?: typeof fetch;
 };
 
 export type Tool<P = unknown> = {
@@ -121,6 +125,17 @@ export const TOOLS = [
     preview: () => "Minecraft-Status lesen",
     async run(_p, ctx) {
       return runHelper({ ...ctx, dryRun: false }, "mc-status");
+    },
+  }),
+  defineTool({
+    name: "calendar_events",
+    kind: "read",
+    description: "Kalendertermine (Google, nur lesen): offset = Tage ab heute (0 heute, 1 morgen), days = Anzahl Tage, max. 7 Tage voraus",
+    params: z.object({ offset: z.coerce.number().int().min(0).max(6).default(0), days: z.coerce.number().int().min(1).max(7).default(1) }),
+    preview: (p) => `Kalender lesen (${p.days} Tag${p.days === 1 ? "" : "e"} ab +${p.offset})`,
+    async run(p, ctx) {
+      const tz = ctx.cfg.AGENT_TZ;
+      return formatCalendar(await loadCalendar(ctx.cfg, p.offset, p.days, ctx.fetch), today(tz), tz);
     },
   }),
   defineTool({
