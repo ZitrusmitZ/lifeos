@@ -126,7 +126,7 @@ describe("Homeserver-Tools: Aufrufe", () => {
   });
 
   it("alle ändernden Tools sind als change markiert", () => {
-    expect(HOMESERVER_TOOLS.filter((t) => t.kind === "change").map((t) => t.name).sort()).toEqual(["pihole_domain", "pihole_gravity", "pihole_pause", "pihole_resume"]);
+    expect(HOMESERVER_TOOLS.filter((t) => t.kind === "change").map((t) => t.name).sort()).toEqual(["nextcloud_share", "pihole_domain", "pihole_gravity", "pihole_pause", "pihole_resume"]);
   });
 });
 
