@@ -93,3 +93,10 @@ Alles aus dem Plan ist gebaut; Abweichungen und Ergänzungen:
 
 - Telegram-Bot-Token und User-ID eintragen, `claude setup-token` als Nutzer `lifeos` ausführen, optional Notion-Token.
 - LifeOS-Image neu bauen/deployen, damit `/api/jobs/agent-briefing` existiert (sonst Briefing ohne Kalender).
+
+## Nachtrag: Web-Chat im Dashboard (2026-10-22)
+
+- Agent lauscht zusätzlich auf `/run/lifeos-agent/web.sock` (`src/agent/web/server.ts`, Bearer `LIFEOS_CRON_TOKEN`); der Container bindet den Ordner ein (`compose.yaml`).
+- `WebMessenger` + `ChannelMessenger` (`src/agent/web/messenger.ts`): Chat-ID `> 0` → Telegram, `-sessionId` → Web-Unterhaltung, `0` → jüngste Unterhaltung. Gateway, Bestätigungen und Queue unverändert, nur `handleWebText`/`handleWebAction` neu.
+- Unterhaltungen in `agent.db` (Migration 2: `web_sessions`, `web_messages`), Seite `/agent` zum Nachschlagen, Chat-Sheet überall.
+- Telegram optional: ohne Bot-Token startet der Agent nur mit Web-Chat, Pushes gehen in die jüngste Unterhaltung.

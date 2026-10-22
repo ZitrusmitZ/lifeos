@@ -100,7 +100,7 @@ More detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Telegram Agent
 
-A Telegram bot that runs 24/7 next to LifeOS on the home server: it sends scheduled messages (morning briefing, server health, study reminders, your own jobs) and takes server tasks – but only from one Telegram user, and anything that changes the server needs a button tap first.
+A Telegram bot (also usable as a chat inside the dashboard, see below) that runs 24/7 next to LifeOS on the home server: it sends scheduled messages (morning briefing, server health, study reminders, your own jobs) and takes server tasks – but only from one Telegram user, and anything that changes the server needs a button tap first.
 
 ```
 Telegram (long polling – no open port)
@@ -134,12 +134,27 @@ Scheduler (agent.db, Europe/Berlin) ──► Telegram
 sudo bash scripts/install_agent.sh   # idempotent: Node, user `lifeos`, Ollama + model (MemoryMax=5G), helper, sudoers, systemd
 ```
 
-1. **Bot token:** in Telegram talk to [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token into `TELEGRAM_BOT_TOKEN` in `/etc/lifeos-agent/agent.env`.
+1. **Bot token (optional – skip steps 1–2 for a web-only agent):** in Telegram talk to [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token into `TELEGRAM_BOT_TOKEN` in `/etc/lifeos-agent/agent.env`.
 2. **Your user ID:** message [@userinfobot](https://t.me/userinfobot) → put the number into `TELEGRAM_ALLOWED_USER_ID`. Everyone else is ignored (and logged).
 3. **Claude:** `sudo -u lifeos -H /var/lib/lifeos-agent/.local/bin/claude setup-token` → put the token into `CLAUDE_CODE_OAUTH_TOKEN`. Without it the bot runs local-only and says so on start.
 4. **Notion (optional):** create an internal integration at notion.so/profile/integrations, connect it to the task database (… → Connections), set `NOTION_TOKEN` and `NOTION_TASKS_DB_ID` (the 32-char ID in the database URL). Property names are configurable (`NOTION_PROP_*`).
 5. **Calendar (optional):** `LIFEOS_CRON_TOKEN` is copied from `/opt/lifeos/.env` by the install script; needs a LifeOS image that includes `/api/jobs/agent-briefing`.
 6. `sudo systemctl restart lifeos-agent` · logs: `journalctl -u lifeos-agent -f` (plus `/var/lib/lifeos-agent/logs/agent.log`) · health: `curl 127.0.0.1:8788/health`.
+
+### Web chat in the dashboard
+
+The same agent is also reachable from LifeOS itself – no Telegram needed. A floating chat button (bottom left, above the tab bar) opens the chat as a sheet on every page; `/agent` (header icon on desktop, "Alle Unterhaltungen" in the sheet) lists all past conversations grouped by day, searchable, swipe to delete, and lets you reopen and continue any of them.
+
+```
+Browser ─► /api/agent/* (proxy.ts: Tailscale identity + origin check)
+             └─► Unix socket /run/lifeos-agent/web.sock (Bearer CRON_TOKEN)
+                    └─► agent: same gateway as Telegram (rules, tools, confirm buttons, jobs, router)
+```
+
+- **Transport:** the agent listens on a Unix socket (`AGENT_WEB_SOCKET`), not a TCP port; `compose.yaml` mounts `/run/lifeos-agent` read-only into the container (the folder, so an agent restart doesn't orphan the mount – `RuntimeDirectoryPreserve=yes`). Auth reuses `CRON_TOKEN` / `LIFEOS_CRON_TOKEN`; without it the web chat stays off.
+- **Conversations** are stored in `agent.db` (`web_sessions`, `web_messages`) and kept until deleted. Web conversations use negative chat IDs internally (`-sessionId`), so confirmations, job proposals and quota-queue answers land in the conversation they came from.
+- **Telegram is optional.** Without `TELEGRAM_BOT_TOKEN` the agent runs web-only; scheduled messages (briefing, reminders, health alerts) then go to the most recent web conversation. It refuses to start only if neither channel is configured.
+- The dashboard polls while the agent is "typing" (1.5 s) and otherwise every 20 s; replies are rendered from the Telegram HTML subset without `innerHTML`.
 
 `node src/agent/main.ts --dry-run` (or `AGENT_DRY_RUN=true`) runs the full bot but only simulates changing tools.
 

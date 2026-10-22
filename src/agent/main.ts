@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { isPrivateBind, loadConfig, type AgentConfig } from "./config.ts";
 import { ConfirmFlow } from "./confirm.ts";
@@ -16,28 +16,34 @@ import { seedDefaultJobs, Scheduler, type Job } from "./scheduler/scheduler.ts";
 import { TelegramApi } from "./telegram/api.ts";
 import { escapeHtml, markdownToHtml } from "./telegram/format.ts";
 import { execRunner } from "./tools/exec.ts";
+import { ChannelMessenger, pushChatId, WebMessenger } from "./web/messenger.ts";
+import { startWebServer } from "./web/server.ts";
 
 /**
  * Einstieg: `node src/agent/main.ts [--dry-run]` (Node ≥ 22.18 entfernt die Typen selbst, kein Build-Schritt).
- * Läuft als systemd-Dienst `lifeos-agent` mit Nutzer `lifeos`.
+ * Läuft als systemd-Dienst `lifeos-agent` mit Nutzer `lifeos`. Kanäle: Telegram (optional) und der Web-Chat im
+ * LifeOS-Dashboard (Unix-Socket, braucht `LIFEOS_CRON_TOKEN`). Mindestens einer muss eingerichtet sein.
  */
 
 const TICK_MS = 30_000;
 
-type State = { lastPollAt: number; startedAt: number; ollama: boolean; claude: boolean; stopping: boolean };
+type State = { lastPollAt: number; startedAt: number; ollama: boolean; claude: boolean; stopping: boolean; telegram: boolean; web: boolean };
 
 async function main(): Promise<void> {
   if (process.argv.includes("--dry-run")) process.env.AGENT_DRY_RUN = "true";
   const cfg = loadConfig();
-  if (!cfg.TELEGRAM_BOT_TOKEN || !cfg.TELEGRAM_ALLOWED_USER_ID) {
-    log.error("main", "TELEGRAM_BOT_TOKEN und TELEGRAM_ALLOWED_USER_ID müssen gesetzt sein (/etc/lifeos-agent/agent.env)");
+  const telegramOn = Boolean(cfg.TELEGRAM_BOT_TOKEN && cfg.TELEGRAM_ALLOWED_USER_ID);
+  if (!telegramOn && !cfg.LIFEOS_CRON_TOKEN) {
+    log.error("main", "Kein Kanal: TELEGRAM_BOT_TOKEN + TELEGRAM_ALLOWED_USER_ID oder LIFEOS_CRON_TOKEN (Web-Chat) setzen (/etc/lifeos-agent/agent.env)");
     process.exit(2);
   }
   initFileLog(path.join(cfg.AGENT_DATA_DIR, "logs"));
   const db = openAgentDb(path.join(cfg.AGENT_DATA_DIR, "agent.db"));
-  const chatId = cfg.TELEGRAM_ALLOWED_USER_ID; // privater Chat: Chat-ID = User-ID
-  const tg = new TelegramApi(cfg.TELEGRAM_BOT_TOKEN);
-  const state: State = { lastPollAt: 0, startedAt: Date.now(), ollama: false, claude: false, stopping: false };
+  const chatId = pushChatId(cfg); // Telegram: privater Chat, Chat-ID = User-ID; sonst jüngste Web-Unterhaltung
+  const telegram = telegramOn ? new TelegramApi(cfg.TELEGRAM_BOT_TOKEN!) : null;
+  const web = new WebMessenger(db);
+  const tg = new ChannelMessenger(telegram, web);
+  const state: State = { lastPollAt: 0, startedAt: Date.now(), ollama: false, claude: false, stopping: false, telegram: telegramOn, web: false };
 
   const local = new OllamaProvider(cfg.OLLAMA_URL, cfg.OLLAMA_TIMEOUT_MS);
   const claude = new ClaudeProvider({
@@ -76,13 +82,16 @@ async function main(): Promise<void> {
   state.claude = auth.loggedIn;
   log.info("main", `Start${cfg.AGENT_DRY_RUN ? " (Dry-Run)" : ""}: Ollama ${state.ollama ? "ok" : "nicht verfügbar"}, Claude ${auth.loggedIn ? `eingeloggt (${auth.detail})` : "nicht eingeloggt"}`);
   seedDefaultJobs(db, cfg, cfg.AGENT_TZ);
-  await tg.setCommands(COMMANDS).catch((err) => log.warn("telegram", `setMyCommands: ${(err as Error).message}`));
+  await telegram?.setCommands(COMMANDS).catch((err) => log.warn("telegram", `setMyCommands: ${(err as Error).message}`));
   const warnings = [
     !auth.loggedIn ? "⚠️ Claude-CLI nicht eingeloggt – nur lokaler Modus. Fix: <code>sudo -iu lifeos claude setup-token</code>, Token in agent.env." : null,
     !state.ollama ? `⚠️ Ollama bzw. Modell <code>${escapeHtml(cfg.OLLAMA_MODEL)}</code> nicht verfügbar – Klassifikation fällt auf „complex“ zurück.` : null,
     cfg.AGENT_DRY_RUN ? "🧪 Dry-Run: ändernde Aktionen werden nur simuliert." : null,
   ].filter(Boolean);
-  await tg.send(chatId, `🟢 LifeOS-Agent gestartet${warnings.length ? `\n${warnings.join("\n")}` : ""}`).catch((err) => log.error("telegram", (err as Error).message));
+  // nur an Telegram – im Web-Chat würde jeder Neustart die jüngste Unterhaltung zumüllen
+  await telegram
+    ?.send(chatId, `🟢 LifeOS-Agent gestartet${warnings.length ? `\n${warnings.join("\n")}` : ""}`)
+    .catch((err) => log.error("telegram", (err as Error).message));
 
   // ── Jobs ────────────────────────────────────────────────────────
   const scheduler = new Scheduler(db, cfg.AGENT_TZ, {
@@ -120,7 +129,7 @@ async function main(): Promise<void> {
     if (ticks % 10 === 0) state.ollama = await local.check(cfg.OLLAMA_MODEL); // alle 5 Min
     if (!state.claude && ticks % 60 === 0) {
       state.claude = (await claude.checkAuth()).loggedIn;
-      if (state.claude) await tg.send(chatId, "🟢 Claude-CLI jetzt eingeloggt.").catch(() => undefined);
+      if (state.claude) await telegram?.send(chatId, "🟢 Claude-CLI jetzt eingeloggt.").catch(() => undefined);
     }
   };
   sampler.sample();
@@ -128,6 +137,23 @@ async function main(): Promise<void> {
   void tick();
 
   const server = startHealthServer(cfg, state, db);
+  let webServer: Server | null = null;
+  if (cfg.LIFEOS_CRON_TOKEN) {
+    webServer = await startWebServer(cfg.AGENT_WEB_SOCKET, {
+      db,
+      gateway,
+      web,
+      token: cfg.LIFEOS_CRON_TOKEN,
+      status: () => ({ telegram: telegramOn, claude: state.claude, ollama: state.ollama, dryRun: cfg.AGENT_DRY_RUN }),
+    }).catch((err) => {
+      log.warn("web", `Web-Chat nicht gestartet (${cfg.AGENT_WEB_SOCKET}): ${(err as Error).message}`);
+      return null;
+    });
+    state.web = webServer !== null;
+    if (webServer) log.info("web", `Web-Chat auf ${cfg.AGENT_WEB_SOCKET}`);
+  } else {
+    log.warn("web", "LIFEOS_CRON_TOKEN fehlt – Web-Chat im Dashboard aus");
+  }
 
   // ── Telegram Long Polling ───────────────────────────────────────
   const stop = () => {
@@ -136,6 +162,7 @@ async function main(): Promise<void> {
     log.info("main", "Beende…");
     clearInterval(tickTimer);
     server?.close();
+    webServer?.close();
     setTimeout(() => {
       db.close();
       process.exit(0);
@@ -144,7 +171,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
 
-  await pollLoop(tg, gateway, db, state);
+  if (telegram) await pollLoop(telegram, gateway, db, state);
 }
 
 async function pollLoop(tg: TelegramApi, gateway: Gateway, db: AgentDB, state: State): Promise<void> {
@@ -176,7 +203,7 @@ function startHealthServer(cfg: AgentConfig, state: State, db: AgentDB) {
       res.writeHead(404).end();
       return;
     }
-    const polling = Date.now() - state.lastPollAt < 120_000;
+    const polling = !state.telegram || Date.now() - state.lastPollAt < 120_000;
     let dbOk = true;
     try {
       db.prepare("SELECT 1").get();
@@ -185,7 +212,7 @@ function startHealthServer(cfg: AgentConfig, state: State, db: AgentDB) {
     }
     const ok = polling && dbOk;
     res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok, polling, db: dbOk, ollama: state.ollama, claude: state.claude, uptimeSec: Math.round((Date.now() - state.startedAt) / 1000) }));
+    res.end(JSON.stringify({ ok, polling, db: dbOk, telegram: state.telegram, web: state.web, ollama: state.ollama, claude: state.claude, uptimeSec: Math.round((Date.now() - state.startedAt) / 1000) }));
   });
   server.on("error", (err) => log.warn("health", err.message));
   server.listen(cfg.AGENT_HEALTH_PORT, cfg.AGENT_HEALTH_HOST);

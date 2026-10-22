@@ -136,6 +136,8 @@ export const spawnClaude: ClaudeSpawn = (bin, args, opts) =>
       clearTimeout(timer);
       resolve({ code, stderr });
     });
+    // Beendet sich die CLI sofort (kaputt, falscher Pfad), schlägt das Schreiben mit EPIPE fehl – sonst stürzt der Agent ab
+    child.stdin.on("error", () => undefined);
     child.stdin.end(opts.stdin);
   });
 

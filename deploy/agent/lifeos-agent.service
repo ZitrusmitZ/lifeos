@@ -1,5 +1,5 @@
 [Unit]
-Description=LifeOS Telegram-Agent
+Description=LifeOS-Agent (Telegram + Web-Chat im Dashboard)
 After=network-online.target ollama.service docker.service
 Wants=network-online.target
 
@@ -26,6 +26,11 @@ ProtectSystem=full
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/var/lib/lifeos-agent
+# Web-Chat: /run/lifeos-agent/web.sock, Ordner wird in den LifeOS-Container gemountet.
+# Preserve: der Ordner überlebt Neustarts, sonst zeigt der Bind-Mount im Container ins Leere.
+RuntimeDirectory=lifeos-agent
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
 
 [Install]
 WantedBy=multi-user.target

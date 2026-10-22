@@ -96,6 +96,26 @@ const MIGRATIONS: string[] = [
     cost_usd      REAL NOT NULL
   );
   `,
+  `
+  -- Web-Chat im LifeOS-Dashboard: Unterhaltungen bleiben zum Nachschlagen erhalten (Löschen nur explizit)
+  CREATE TABLE web_sessions (
+    id         INTEGER PRIMARY KEY,
+    title      TEXT,                        -- erste Nachricht von Luis (gekürzt)
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE web_messages (
+    id         INTEGER PRIMARY KEY,
+    session_id INTEGER NOT NULL REFERENCES web_sessions (id) ON DELETE CASCADE,
+    role       TEXT NOT NULL,               -- 'user' | 'agent'
+    html       TEXT NOT NULL,               -- Telegram-HTML-Subset (b, i, code, pre)
+    buttons    TEXT,                        -- JSON InlineButton[][] oder NULL
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX web_messages_session ON web_messages (session_id, id);
+  CREATE INDEX web_sessions_updated ON web_sessions (updated_at);
+  `,
 ];
 
 export type AgentDB = DatabaseSync;

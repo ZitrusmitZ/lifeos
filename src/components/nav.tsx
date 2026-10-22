@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, GraduationCap, Heart, ListChecks, Settings, Sun } from "lucide-react";
+import { BookOpen, GraduationCap, Heart, ListChecks, MessageCircle, Settings, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
@@ -189,6 +189,24 @@ export function SettingsLink({ className }: { className?: string }) {
       )}
     >
       <Settings className="size-[1.375rem]" aria-hidden />
+    </Link>
+  );
+}
+
+/** Agent-Unterhaltungen (am Rechner in der Kopfleiste; mobil über den Chat-Knopf erreichbar). */
+export function AgentLink({ className }: { className?: string }) {
+  const path = usePathname();
+  return (
+    <Link
+      href="/agent"
+      aria-label="Agent"
+      aria-current={path.startsWith("/agent") ? "page" : undefined}
+      className={cn(
+        "grid size-11 place-items-center rounded-full text-tint hover:bg-muted active:bg-muted aria-[current=page]:bg-muted",
+        className,
+      )}
+    >
+      <MessageCircle className="size-[1.375rem]" aria-hidden />
     </Link>
   );
 }

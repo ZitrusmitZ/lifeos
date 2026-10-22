@@ -14,6 +14,9 @@ services:
       # LocalAPI von tailscaled (nur lesend genutzt): Allowlist „owner“ überlebt Login-Umbenennungen.
       # Ordner statt Datei, damit der Socket nach einem tailscaled-Neustart wieder erreichbar ist.
       - /var/run/tailscale:/var/run/tailscale:ro
+      # Web-Chat mit dem LifeOS-Agenten (Host-Dienst lifeos-agent, Unix-Socket web.sock, Auth über CRON_TOKEN).
+      # Ebenfalls der Ordner, damit ein Agent-Neustart den Socket nicht „verliert“.
+      - /run/lifeos-agent:/run/lifeos-agent:ro
     mem_limit: 512m
     cpus: 1.0
     security_opt:
