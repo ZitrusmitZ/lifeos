@@ -45,8 +45,10 @@ const schema = z.object({
   OPENAI_MODEL: z.preprocess(emptyAsUnset, z.string().default("gpt-6-luna")),
   /** Harte Monatsgrenze für KI-Kosten in US-Dollar; danach pausiert die KI-Einordnung bis zum Monatswechsel. */
   OPENAI_MONTHLY_BUDGET_USD: z.preprocess(emptyAsUnset, z.coerce.number().default(1)),
-  /** Token für systemd-Timer → POST /api/jobs/* */
+  /** Token für systemd-Timer → POST /api/jobs/* (auch Auth gegenüber dem LifeOS-Agenten) */
   CRON_TOKEN: optional,
+  /** Unix-Socket des LifeOS-Agenten (Web-Chat), vom Host eingebunden – siehe compose.yaml */
+  AGENT_SOCKET: z.preprocess(emptyAsUnset, z.string().default("/run/lifeos-agent/web.sock")),
 
   NEWS_FEEDS: z.preprocess(
     emptyAsUnset,

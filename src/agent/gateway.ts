@@ -10,14 +10,16 @@ import { lastDecision, msgHash, type Router } from "./router.ts";
 import { describeCron, isValidCron, nextRun } from "./scheduler/cron.ts";
 import { parseExplicitJob, parseScheduleRules, parseScheduleWithLlm, type ParsedSchedule } from "./scheduler/parse.ts";
 import { createJob, deleteJob, getJob, listJobs, updateJob } from "./scheduler/scheduler.ts";
-import type { Messenger, TgCallbackQuery, TgMessage, TgUpdate } from "./telegram/api.ts";
+import type { Messenger, TgCallbackQuery, TgUpdate } from "./telegram/api.ts";
 import { escapeHtml, markdownToHtml } from "./telegram/format.ts";
 import { looksLikeSchedule, matchToolIntent, pickToolWithLlm } from "./tools/intents.ts";
 import { formatSystemStatus, readSystemStatus } from "./tools/system.ts";
+import { webChatId } from "./web/messenger.ts";
 import { formatTime, relativeTime } from "../lib/time.ts";
 
 /**
- * Telegram-Gateway: nur Luis' User-ID wird bedient, alles andere still ignoriert (aber geloggt).
+ * Gateway für Telegram und den Web-Chat im Dashboard. Telegram: nur Luis' User-ID wird bedient, alles andere still
+ * ignoriert (aber geloggt).
  * Reihenfolge pro Nachricht: Slash-Befehle → Regeln (Tools, Jobs) → lokale Klassifikation → Modell.
  */
 
@@ -117,17 +119,35 @@ export class Gateway {
       await this.d.tg.send(msg.chat.id, "⏱ Nachricht war zu alt (Bot war offline) – bitte nochmal schicken.");
       return;
     }
+    await this.process(msg.chat.id, msg.text);
+  }
+
+  /**
+   * Web-Chat im Dashboard (Unterhaltung `sessionId`). Keine Whitelist: Zugriff regeln Unix-Socket + Token
+   * auf Agent-Seite und Tailscale-Identität im Dashboard.
+   */
+  async handleWebText(sessionId: number, text: string): Promise<void> {
+    await this.process(webChatId(sessionId), text);
+  }
+
+  /** Button-Klick aus dem Dashboard (`c:<id>:y|n` bzw. `j:<id>:y|n`, gleiche Daten wie bei Telegram). */
+  async handleWebAction(data: string): Promise<void> {
+    if (data.startsWith("c:")) return this.d.confirm.onCallback(data, "");
+    if (data.startsWith("j:")) return this.onJobCallback(data, "");
+  }
+
+  private async process(chatId: number, text: string): Promise<void> {
     const rl = this.limiter.check(this.now());
     if (rl === "drop") return;
     if (rl === "warn") {
-      await this.d.tg.send(msg.chat.id, `🛑 Mehr als ${this.d.cfg.AGENT_RATE_LIMIT_PER_MIN} Nachrichten pro Minute – kurz Pause.`);
+      await this.d.tg.send(chatId, `🛑 Mehr als ${this.d.cfg.AGENT_RATE_LIMIT_PER_MIN} Nachrichten pro Minute – kurz Pause.`);
       return;
     }
     try {
-      await this.onText(msg);
+      await this.onText(chatId, text.trim());
     } catch (err) {
       log.error("gateway", (err as Error).stack ?? (err as Error).message);
-      await this.d.tg.send(msg.chat.id, `⚠️ Fehler: ${escapeHtml((err as Error).message)}`).catch(() => undefined);
+      await this.d.tg.send(chatId, `⚠️ Fehler: ${escapeHtml((err as Error).message)}`).catch(() => undefined);
     }
   }
 
@@ -142,9 +162,7 @@ export class Gateway {
     await this.d.tg.answerCallback(q.id, "Unbekannt");
   }
 
-  private async onText(msg: TgMessage): Promise<void> {
-    const chatId = msg.chat.id;
-    const text = msg.text!.trim();
+  private async onText(chatId: number, text: string): Promise<void> {
     if (text.startsWith("/")) return this.onCommand(chatId, text);
 
     // Stufe 1: Regeln – ohne LLM

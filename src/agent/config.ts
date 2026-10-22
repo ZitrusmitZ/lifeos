@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Konfiguration des Telegram-Agenten (eigener Prozess auf dem Host, nicht im LifeOS-Container).
+ * Konfiguration des LifeOS-Agenten (Telegram und Web-Chat; eigener Prozess auf dem Host, nicht im LifeOS-Container).
  * Quelle: `/etc/lifeos-agent/agent.env` über systemd `EnvironmentFile`. `CLAUDE_CODE_OAUTH_TOKEN` steht dort auch,
  * wird hier aber bewusst nicht gelesen – nur die `claude`-CLI selbst wertet es aus.
  */
@@ -45,6 +45,8 @@ const schema = z.object({
   AGENT_DRY_RUN: bool(false),
   AGENT_HEALTH_HOST: str("127.0.0.1").refine(isPrivateBind, "AGENT_HEALTH_HOST muss Loopback oder eine Tailscale-IP sein"),
   AGENT_HEALTH_PORT: num(8788),
+  /** Unix-Socket für den Web-Chat im Dashboard (Ordner wird in den LifeOS-Container gemountet). Auth: LIFEOS_CRON_TOKEN. */
+  AGENT_WEB_SOCKET: str("/run/lifeos-agent/web.sock"),
 
   // ── lokales Modell ────────────────────────────────────────────────
   OLLAMA_URL: str("http://127.0.0.1:11434"),

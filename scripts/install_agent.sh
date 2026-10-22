@@ -116,9 +116,13 @@ install -m 644 "$REPO/deploy/agent/lifeos-agent.service" /etc/systemd/system/lif
 systemctl daemon-reload
 systemctl enable lifeos-agent >/dev/null 2>&1
 
+# Mindestens ein Kanal: Telegram (Token + User-ID) oder der Web-Chat (LIFEOS_CRON_TOKEN)
 missing=()
-[[ -n "$(envval TELEGRAM_BOT_TOKEN)" ]] || missing+=(TELEGRAM_BOT_TOKEN)
-[[ -n "$(envval TELEGRAM_ALLOWED_USER_ID)" ]] || missing+=(TELEGRAM_ALLOWED_USER_ID)
+if [[ -z "$(envval TELEGRAM_BOT_TOKEN)" && -z "$(envval LIFEOS_CRON_TOKEN)" ]]; then
+  missing+=("TELEGRAM_BOT_TOKEN + TELEGRAM_ALLOWED_USER_ID oder LIFEOS_CRON_TOKEN")
+elif [[ -n "$(envval TELEGRAM_BOT_TOKEN)" && -z "$(envval TELEGRAM_ALLOWED_USER_ID)" ]]; then
+  missing+=(TELEGRAM_ALLOWED_USER_ID)
+fi
 
 echo
 if ((${#missing[@]})); then
