@@ -1,6 +1,6 @@
-# Telegram-Agent – Plan
+# Telegram-Agent – Plan und Stand
 
-Stand: 2026-10-22 · Branch `feat/telegram-agent`
+Stand: 2026-10-22 · Branch `feat/telegram-agent` · **umgesetzt** (Abschnitt „Ist-Stand“ unten)
 
 ## Befund (Phase 1)
 
@@ -71,11 +71,23 @@ src/agent/
   jobs/health.ts        Health-Checks, Drosselung, Tageszusammenfassung
   integrations/notion.ts
   integrations/lifeos.ts
-src/app/api/jobs/agent-briefing/route.ts   Kalender + LifeOS-Überblick für das Briefing
+src/app/api/jobs/agent-briefing/route.ts   heutige Kalendertermine für das Briefing
 deploy/agent/           lifeos-agent.service, ollama-Override, helper.sh, helper.conf, sudoers, agent.env.example
 scripts/install_agent.sh
 tests/agent/*.test.ts
 ```
+
+## Ist-Stand nach der Umsetzung
+
+Alles aus dem Plan ist gebaut; Abweichungen und Ergänzungen:
+
+- **Backups** nutzen die vorhandenen Units (`lifeos-backup`, `minecraft-backup`, `offsite-backup`) über `systemctl start --wait` im Helfer – kein zweites Backup-Skript.
+- **Dienste-Whitelist** standardmäßig `ollama`, `tailscaled`, `playit` (systemd) und `lifeos`, `minecraft` (Docker). `docker.service` selbst und `ssh` bewusst nicht (Neustart würde alles bzw. den Fernzugang kappen); `lifeos-agent` kann sich nicht selbst neu starten.
+- **Deployment-Ort:** `install_agent.sh` kopiert `src/agent/` + `src/lib/time.ts` nach `/opt/lifeos-agent` mit eigenem `package.json` (`"type": "module"`, nur `zod` in der Version aus `package-lock.json`). So braucht der Dienst weder `next` noch das Root-owned Checkout `/opt/lifeos`.
+- **Ressourcen:** Ollama `MemoryMax=5G`, `Nice=10`, `CPUWeight=30`; Agent `MemoryMax=1G`, `Nice=5`, `CPUWeight=50` – Minecraft behält Vorrang.
+- **Alte Nachrichten** (> 10 Min, z. B. nach Ausfall) werden nicht mehr ausgeführt; der Telegram-Offset wird vor der Verarbeitung gespeichert, damit ein Absturz eine Aktion nie doppelt auslöst.
+- **`/job_edit`** zusätzlich zu `/job_add`/`/job_del`, damit Lern-Erinnerung (Zeit/Text) per Chat änderbar ist.
+- **Tests:** 8 neue Testdateien (`tests/agent/*`, `tests/agent-briefing.test.ts`), alle Provider gemockt, keine echten Claude-Aufrufe; die CLI wird in Tests durch eine Fake-Spawn-Funktion ersetzt.
 
 ## Offene Punkte für Luis
 

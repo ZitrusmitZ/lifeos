@@ -98,6 +98,57 @@ flowchart LR
 
 More detail in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+## Telegram Agent
+
+A Telegram bot that runs 24/7 next to LifeOS on the home server: it sends scheduled messages (morning briefing, server health, study reminders, your own jobs) and takes server tasks – but only from one Telegram user, and anything that changes the server needs a button tap first.
+
+```
+Telegram (long polling – no open port)
+   │  only TELEGRAM_ALLOWED_USER_ID, 20 msgs/min
+   ▼
+Gateway ──► Router ──► local: Ollama (qwen2.5:3b)        trivial
+   │          │        claude: `claude -p` (Pro plan)    simple → haiku · complex → sonnet · hard → opus
+   │          │        api:    disabled (interface only)
+   │          ▼
+   │      Tools (fixed functions) ── confirm buttons (5 min) ── audit log
+   ▼
+Scheduler (agent.db, Europe/Berlin) ──► Telegram
+```
+
+- **Separate host process, same stack.** `src/agent/` is TypeScript run directly by Node ≥ 22.18 (type stripping, no build). It needs `systemctl`, `journalctl` and the `claude` CLI, so it runs as the unprivileged system user `lifeos`, not inside the hardened container. Own SQLite file (`/var/lib/lifeos-agent/agent.db`), same `node:sqlite` + `user_version` migration pattern.
+- **Routing.** Rules first (slash commands, "Status", "Starte Minecraft neu", "Logs von ollama 50", "Erinner mich …") – no model involved. Otherwise the local model returns `{"complexity","needs_tools","category"}` as JSON (invalid → one retry → `complex`) and picks the tier. A failing/empty/slow (> 60 s) local answer escalates one tier. Every decision is logged (message hash, provider, model, reason, duration); `/model` shows the last one.
+- **Claude only via the official CLI.** `claude -p --output-format stream-json --model <alias>` as a subprocess with `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` stripped from its environment. Auth is the CLI's own (`claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN`); the agent never reads the token or `~/.claude/.credentials.json` and never calls the API with it. Usage-limit errors → Telegram notice with reset time, request goes into a persistent queue that runs after the reset, simple questions are answered locally meanwhile ("lokal beantwortet, Qualität eingeschränkt").
+- **Server actions.** Typed tools only – no free shell, no `shell=True`, no string-built commands. Changes go through a root-owned helper (`deploy/agent/helper.sh`) that re-checks every verb and name against `/etc/lifeos-agent/helper.conf`; sudoers allows `lifeos` exactly that helper. Content from logs, Notion or the calendar is shown as data and never triggers a tool.
+
+| Tool | Confirmation |
+|---|---|
+| `system_status`, `service_status`, `service_logs` (≤ 100 lines), `minecraft_status` | no |
+| `service_restart`, `minecraft_say`, `minecraft_restart`, `backup_run`, `git_pull_project` | **yes** – exact command in the preview |
+| `run_task` – delegates to `claude -p` with `Read/Glob/Grep/Edit/Write` (no shell) in `/var/lib/lifeos-agent/workspace` | **yes** – with Claude's plan as preview |
+
+**Default jobs** (each switchable in `agent.env`): morning briefing weekdays 06:30 / weekends 09:00 (Notion "today" + overdue tasks by priority, today's calendar events via `GET /api/jobs/agent-briefing`, one server line only if something is off – missing integrations are skipped with a hint); health check every 15 min that only messages on problems (disk > 85 %, RAM > 90 % for > 10 min, service/Minecraft down, CPU > 80 °C; max once per hour per problem) plus a 21:00 summary; study reminder Mon–Thu 16:30. Jobs survive restarts; a missed run is caught up once if it is at most 1 h old.
+
+### Setup
+
+```bash
+sudo bash scripts/install_agent.sh   # idempotent: Node, user `lifeos`, Ollama + model (MemoryMax=5G), helper, sudoers, systemd
+```
+
+1. **Bot token:** in Telegram talk to [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token into `TELEGRAM_BOT_TOKEN` in `/etc/lifeos-agent/agent.env`.
+2. **Your user ID:** message [@userinfobot](https://t.me/userinfobot) → put the number into `TELEGRAM_ALLOWED_USER_ID`. Everyone else is ignored (and logged).
+3. **Claude:** `sudo -u lifeos -H /var/lib/lifeos-agent/.local/bin/claude setup-token` → put the token into `CLAUDE_CODE_OAUTH_TOKEN`. Without it the bot runs local-only and says so on start.
+4. **Notion (optional):** create an internal integration at notion.so/profile/integrations, connect it to the task database (… → Connections), set `NOTION_TOKEN` and `NOTION_TASKS_DB_ID` (the 32-char ID in the database URL). Property names are configurable (`NOTION_PROP_*`).
+5. **Calendar (optional):** `LIFEOS_CRON_TOKEN` is copied from `/opt/lifeos/.env` by the install script; needs a LifeOS image that includes `/api/jobs/agent-briefing`.
+6. `sudo systemctl restart lifeos-agent` · logs: `journalctl -u lifeos-agent -f` (plus `/var/lib/lifeos-agent/logs/agent.log`) · health: `curl 127.0.0.1:8788/health`.
+
+`node src/agent/main.ts --dry-run` (or `AGENT_DRY_RUN=true`) runs the full bot but only simulates changing tools.
+
+**Commands:** `/status` · `/jobs` · `/job_add jeden Freitag um 16 Uhr an Wäsche` or `/job_add 0 16 * * 5 | Wäsche` · `/job_edit <id> <cron or "Mo–Do um 17:30"> | <text>` · `/job_del <id>` · `/model` · `/quota` · `/help`. Free text like "Erinner mich jeden Freitag um 16 Uhr an X" proposes `0 16 * * 5 – Freitags 16:00 – „X“` with buttons and is saved only after confirmation. Prefix the reminder text with `KI:` to have it generated through the router at run time.
+
+**Config** lives in `/etc/lifeos-agent/agent.env` (template: [`deploy/agent/agent.env.example`](deploy/agent/agent.env.example)): model aliases (`CLAUDE_MODEL_SIMPLE/COMPLEX/HARD`, `OLLAMA_MODEL`), service/backup/project whitelists (must match `helper.conf`), health thresholds, job switches, `ENABLE_API_PROVIDER=false` (if enabled later: own API key, monthly budget and per-token prices required, cost logged per call).
+
+**Extending:** a new tool is a `defineTool({...})` entry in `src/agent/tools/registry.ts` (Zod params, `kind: "read" | "change"`, `preview`, `run`) – plus a helper verb in `deploy/agent/helper.sh` if it needs root, and optionally a rule in `tools/intents.ts`. The agent cannot add tools at runtime. A new job type is a runner in `src/agent/main.ts` and an entry in `JobType`; default jobs live in `DEFAULT_JOBS` in `scheduler/scheduler.ts`.
+
 ## Tech stack
 
 Next.js 16 (App Router, Cache Components, Server Actions) · React 19 · TypeScript · Tailwind CSS 4 · shadcn/ui · Recharts · Zod · `node:sqlite` · Vitest · Playwright · Docker · GitHub Actions · Tailscale
@@ -139,7 +190,9 @@ src/
   integrations/     one module per data source + load()/cache contract
   lib/              db, crypto, cache, habits, health, access rules, time helpers
   proxy.ts          Tailscale identity check
-deploy/             bootstrap script, backup, systemd units
+  agent/            Telegram agent (separate host process, see "Telegram Agent")
+deploy/             bootstrap script, backup, systemd units; agent/ = agent unit, helper, sudoers
+scripts/            install_agent.sh, screenshots
 tests/              Vitest suites + fixtures
 ```
 
