@@ -6,7 +6,16 @@ import { fileKind, formatBytes, type FileKind } from "./types";
  */
 
 export type SharePageView =
-  | { kind: "file"; token: string; name: string; size: number; contentType: string | null; expiresAt: number | null; downloads: number; preview: boolean }
+  | {
+      kind: "file";
+      token: string;
+      name: string;
+      size: number;
+      contentType: string | null;
+      expiresAt: number | null;
+      downloads: number;
+      preview: boolean;
+    }
   | { kind: "password"; token: string; name: string; wrong: boolean }
   | { kind: "gone" }
   | { kind: "limited" };
@@ -14,12 +23,34 @@ export type SharePageView =
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
 
 const LABEL: Record<FileKind, string> = {
-  folder: "Ordner", image: "Bild", video: "Video", audio: "Audio", pdf: "PDF", text: "Text", archive: "Archiv", code: "Code",
-  project: "Projekt", doc: "Dokument", sheet: "Tabelle", slides: "Präsentation", other: "Datei",
+  folder: "Ordner",
+  image: "Bild",
+  video: "Video",
+  audio: "Audio",
+  pdf: "PDF",
+  text: "Text",
+  archive: "Archiv",
+  code: "Code",
+  project: "Projekt",
+  doc: "Dokument",
+  sheet: "Tabelle",
+  slides: "Präsentation",
+  other: "Datei",
 };
 const TONE: Record<FileKind, string> = {
-  folder: "#0a84ff", image: "#30b0c7", video: "#bf5af2", audio: "#ff375f", pdf: "#ff453a", text: "#8e8e93", archive: "#a2845e", code: "#5e5ce6",
-  project: "#ff9f0a", doc: "#0a84ff", sheet: "#30d158", slides: "#ff9f0a", other: "#8e8e93",
+  folder: "#0a84ff",
+  image: "#30b0c7",
+  video: "#bf5af2",
+  audio: "#ff375f",
+  pdf: "#ff453a",
+  text: "#8e8e93",
+  archive: "#a2845e",
+  code: "#5e5ce6",
+  project: "#ff9f0a",
+  doc: "#0a84ff",
+  sheet: "#30d158",
+  slides: "#ff9f0a",
+  other: "#8e8e93",
 };
 
 /** „läuft in 3 Tagen ab“ / „läuft heute ab“ / „läuft nicht ab“ */
@@ -76,7 +107,10 @@ export function renderSharePage(view: SharePageView, now: number = Date.now()): 
         `<div class="card"><h1>Dieser Link ist nicht (mehr) gültig</h1><p class="meta" style="margin:0">Er ist abgelaufen, wurde widerrufen oder war nie richtig. Frag am besten nach einem neuen Link.</p></div>`,
       );
     case "limited":
-      return page("Zu viele Versuche", `<div class="card"><h1>Zu viele Versuche</h1><p class="meta" style="margin:0">Bitte warte ein paar Minuten und versuch es dann noch einmal.</p></div>`);
+      return page(
+        "Zu viele Versuche",
+        `<div class="card"><h1>Zu viele Versuche</h1><p class="meta" style="margin:0">Bitte warte ein paar Minuten und versuch es dann noch einmal.</p></div>`,
+      );
     case "password":
       return page(
         view.name,

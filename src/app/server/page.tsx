@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Cloud, ExternalLink, FileText, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense, type ReactNode } from "react";
 import {
@@ -185,7 +186,13 @@ async function NextcloudSection() {
             </Card>
 
             <Card title="Hochladen">
-              <p className="text-subhead text-muted-foreground">Vorhandene Dateien werden nie überschrieben.</p>
+              <p className="text-subhead text-muted-foreground">
+                Große Dateien, ganze Ordner und Teilen per Link gibt es unter{" "}
+                <Link href="/dateien" className="font-medium text-tint-text">
+                  Dateien
+                </Link>
+                . Hier geht es schnell bis 10 MB; vorhandene Dateien werden nie überschrieben.
+              </p>
               <NextcloudUploadForm defaultFolder={UPLOAD_DIR} />
             </Card>
           </div>

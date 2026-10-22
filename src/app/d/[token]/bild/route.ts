@@ -16,7 +16,9 @@ export async function GET(request: Request, ctx: RouteContext<"/d/[token]/bild">
     const res = await client().preview(file.id, 880);
     const type = res?.headers.get("content-type")?.split(";")[0] ?? "";
     if (!res || !/^image\/(jpeg|png|webp)$/.test(type)) return none;
-    return new Response(res.body, { headers: { "Content-Type": type, "Cache-Control": "private, max-age=600", "X-Content-Type-Options": "nosniff" } });
+    return new Response(res.body, {
+      headers: { "Content-Type": type, "Cache-Control": "private, max-age=600", "X-Content-Type-Options": "nosniff" },
+    });
   } catch {
     return none;
   }

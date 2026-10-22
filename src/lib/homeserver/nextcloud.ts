@@ -220,7 +220,7 @@ export function parseDavEntries(body: string, user: string): NextcloudEntry[] {
 export function parseDavFiles(body: string, user: string): NextcloudFile[] {
   return parseDavEntries(body, user)
     .filter((e) => !e.isDir)
-    .map(({ isDir: _isDir, ...f }) => f)
+    .map(({ id, name, path, size, modifiedAt, contentType }) => ({ id, name, path, size, modifiedAt, contentType }))
     .sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 }
 

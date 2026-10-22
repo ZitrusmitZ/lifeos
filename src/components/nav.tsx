@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, GraduationCap, Heart, ListChecks, MessageCircle, Settings, Sun } from "lucide-react";
+import { BookOpen, FolderClosed, GraduationCap, Heart, ListChecks, MessageCircle, Settings, Sun } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
@@ -207,6 +207,24 @@ export function AgentLink({ className }: { className?: string }) {
       )}
     >
       <MessageCircle className="size-[1.375rem]" aria-hidden />
+    </Link>
+  );
+}
+
+/** Dateien (Nextcloud) – am Rechner in der Kopfleiste; mobil über das Nextcloud-Widget und die Einstellungen. */
+export function FilesLink({ className }: { className?: string }) {
+  const path = usePathname();
+  return (
+    <Link
+      href="/dateien"
+      aria-label="Dateien"
+      aria-current={path.startsWith("/dateien") ? "page" : undefined}
+      className={cn(
+        "grid size-11 place-items-center rounded-full text-tint hover:bg-muted active:bg-muted aria-[current=page]:bg-muted",
+        className,
+      )}
+    >
+      <FolderClosed className="size-[1.375rem]" aria-hidden />
     </Link>
   );
 }

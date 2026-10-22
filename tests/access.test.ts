@@ -17,6 +17,12 @@ describe("checkAccess", () => {
     expect(checkAccess("/api/health", null, strict).allowed).toBe(true);
     expect(checkAccess("/api/healthz", null, strict).allowed).toBe(false);
   });
+  it("gibt nur Freigabe-Links frei, nicht die Datei-API", () => {
+    const token = "a".repeat(43);
+    for (const p of [`/d/${token}`, `/d/${token}/download`, `/d/${token}/bild`]) expect(checkAccess(p, null, strict)).toMatchObject({ allowed: true });
+    for (const p of ["/d/kurz", `/d/${token}/raw`, `/d/${token}/../api/files`, "/dateien", "/api/files", "/api/files/raw", "/d"])
+      expect(checkAccess(p, null, strict)).toMatchObject({ allowed: false });
+  });
   it("gibt nur die echten Icons frei, keine Routen, die mit /icon beginnen", () => {
     expect(checkAccess("/icon.svg", null, strict).allowed).toBe(true);
     expect(checkAccess("/apple-icon", null, strict).allowed).toBe(true);

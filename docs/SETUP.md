@@ -129,7 +129,23 @@ Voraussetzung: Pi-hole und Nextcloud laufen per Docker Compose auf demselben Ser
 4. **HTTPS im Tailnet (optional, für Links):** `sudo tailscale serve --bg --https=8443 http://127.0.0.1:8080` und `sudo tailscale serve --bg --https=8444 http://127.0.0.1:8081`, dann `NEXTCLOUD_PUBLIC_URL=https://<host>.<tailnet>.ts.net:8443` und `PIHOLE_PUBLIC_URL=https://<host>.<tailnet>.ts.net:8444`. Nextcloud braucht dafür zusätzlich `trusted_domains` mit `<host>.<tailnet>.ts.net:8443`, `overwriteprotocol=https` und `trusted_proxies`.
 5. `cd /opt/lifeos && sudo docker compose up -d --no-build`. Unter *Einstellungen → Server* erscheinen Pi-hole und Nextcloud.
 
-**Agent:** Die Tools `pihole_*` und `nextcloud_status` laufen über `GET/POST /api/jobs/homeserver` mit `LIFEOS_CRON_TOKEN` – der Agent braucht keine eigenen Zugangsdaten. Für Status, Logs und Neustart der Container `pihole`, `nextcloud` und `nextcloud-db` in `/etc/lifeos-agent/helper.conf` bei `ALLOWED_DOCKER` und in `agent.env` bei `AGENT_SERVICES` ergänzen.
+### Dateien (`/dateien`) und Freigabe-Links
+
+Unter **Dateien** (Ordner-Symbol in der Kopfleiste, Nextcloud-Widget, *Einstellungen*) lässt sich die Nextcloud durchsuchen, per Drag & Drop befüllen (auch ganze Ordner und Dateien mit mehreren GB – in 8-MB-Stücken, fortsetzbar) und ordnen. Löschen verschiebt in den Nextcloud-Papierkorb.
+
+**Teilen:** LifeOS erzeugt eigene Links `/d/<token>` mit Ablauf (1/7/30 Tage oder nie), optionalem Passwort und Download-Zähler. Damit auch Leute ohne Tailscale sie öffnen können, wird **nur dieser Pfad** per Tailscale Funnel öffentlich:
+
+```bash
+sudo tailscale funnel --bg --https=10000 --set-path=/d http://127.0.0.1:3000/d
+```
+
+Dann in `/opt/lifeos/.env` `SHARE_PUBLIC_URL=https://<host>.<tailnet>.ts.net:10000` setzen und den Container neu starten. Funnel muss im Tailscale-Admin für den Server erlaubt sein (*Access controls → Funnel*, `nodeAttrs` mit `funnel`). Prüfen: `tailscale funnel status` darf nur `/d` zeigen. Ohne Funnel funktionieren die Links nur im Tailnet.
+
+Was öffentlich ist: die Download-Seite (ohne JavaScript, kein Zugriff auf `/_next`), der Download selbst und bei Bildern ein Vorschaubild. Dashboard, `/api/files` und Nextcloud bleiben hinter der Tailnet-Anmeldung. Unbekannte, abgelaufene und widerrufene Links antworten gleich (404); Seitenaufrufe und Passwortversuche sind pro IP begrenzt.
+
+Ordnerstruktur anlegen (einmalig, legt nur Ordner an): `sudo bash ~/homeserver/nextcloud-ordner.sh`. Uploads ohne Ziel landen in `00 Eingang`.
+
+**Agent:** Die Tools `pihole_*`, `nextcloud_status`, `nextcloud_list`, `nextcloud_search` und `nextcloud_share` (öffentlicher Link, nur nach Bestätigung) laufen über `GET/POST /api/jobs/homeserver` mit `LIFEOS_CRON_TOKEN` – der Agent braucht keine eigenen Zugangsdaten. Für Status, Logs und Neustart der Container `pihole`, `nextcloud` und `nextcloud-db` in `/etc/lifeos-agent/helper.conf` bei `ALLOWED_DOCKER` und in `agent.env` bei `AGENT_SERVICES` ergänzen.
 
 ---
 

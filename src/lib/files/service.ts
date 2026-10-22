@@ -267,9 +267,18 @@ const DEMO: Record<string, FileEntry[]> = {
   ],
   "/00 Eingang": [file("/00 Eingang/Tafelbild Bio.jpg", 2_413_002, 5, "image/jpeg")],
   "/01 Schule": [dir("/01 Schule/Q1 (11-1)", 48_200_000, 2), dir("/01 Schule/_Abitur", 0, 500), dir("/01 Schule/_Archiv", 0, 500)],
-  "/01 Schule/Q1 (11-1)": ["Informatik LK", "Mathematik LK", "Deutsch", "Englisch", "Biologie", "Geschichte", "Politische Bildung", "Musik", "Sport", "Seminarkurs"].map(
-    (f, i) => dir(`/01 Schule/Q1 (11-1)/${f}`, i * 1_200_000, 2 + i * 7),
-  ),
+  "/01 Schule/Q1 (11-1)": [
+    "Informatik LK",
+    "Mathematik LK",
+    "Deutsch",
+    "Englisch",
+    "Biologie",
+    "Geschichte",
+    "Politische Bildung",
+    "Musik",
+    "Sport",
+    "Seminarkurs",
+  ].map((f, i) => dir(`/01 Schule/Q1 (11-1)/${f}`, i * 1_200_000, 2 + i * 7)),
   "/02 Musik": [
     dir("/02 Musik/FL Studio Projekte", 9_120_441, 27),
     dir("/02 Musik/Bounces", 300_000_000, 30),

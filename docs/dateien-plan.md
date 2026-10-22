@@ -1,5 +1,10 @@
 # Plan: „Dateien“ – Nextcloud-Oberfläche in LifeOS
 
+> **Stand 2026-10-23:** Phasen 1–4 umgesetzt (Branch `feat/dateien`). Abweichungen vom Plan: PDFs werden nicht im Browser
+> angezeigt, sondern heruntergeladen (fremde Inhalte laufen nie unter der LifeOS-Adresse); unterbrochene Uploads merkt sich
+> `localStorage` statt IndexedDB (die Datei selbst wählt man zum Fortsetzen erneut). Offen: Phase 2 (Bezüge zu Schule/Noten/Lernen,
+> Ordner als ZIP teilen).
+
 Stand 2026-10-22 · Ziel: Nextcloud im Alltag nicht mehr direkt öffnen müssen. Durchsuchen, per Drag & Drop hochladen
 und per Link teilen, im LifeOS-Look (iOS-Karten, `ios-rows`, `SwipeRow`, `Segmented`) mit MediaFire-Anleihen
 (große Drop-Zone, Upload-Warteschlange mit Fortschritt, ein Klick für den Link, eigene Download-Seite mit Zähler).

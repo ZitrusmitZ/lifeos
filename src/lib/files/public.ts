@@ -44,7 +44,10 @@ export function htmlResponse(view: SharePageView, status = 200, extra: HeadersIn
   const headers = new Headers(extra);
   headers.set("Content-Type", "text/html; charset=utf-8");
   headers.set("Cache-Control", "no-store");
-  headers.set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+  headers.set(
+    "Content-Security-Policy",
+    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+  );
   headers.set("Referrer-Policy", "no-referrer");
   headers.set("X-Robots-Tag", "noindex, nofollow");
   return new Response(renderSharePage(view), { status, headers });
@@ -54,5 +57,4 @@ export const gone = () => htmlResponse({ kind: "gone" }, 404);
 export const limited = () => htmlResponse({ kind: "limited" }, 429, { "Retry-After": "300" });
 
 /** Hinter Funnel/serve kommt die Anfrage per HTTP an; maßgeblich ist, was der Browser sieht. */
-export const isHttps = (request: Request) =>
-  request.headers.get("x-forwarded-proto") === "https" || new URL(request.url).protocol === "https:";
+export const isHttps = (request: Request) => request.headers.get("x-forwarded-proto") === "https" || new URL(request.url).protocol === "https:";

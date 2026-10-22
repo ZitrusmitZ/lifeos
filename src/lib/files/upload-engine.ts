@@ -29,7 +29,13 @@ export type UploadItem = {
   resumed?: boolean;
 };
 
-type Internal = UploadItem & { file: File; uploadId?: string; xhr?: XMLHttpRequest; onConflict: "ask" | "rename"; samples: { t: number; b: number }[] };
+type Internal = UploadItem & {
+  file: File;
+  uploadId?: string;
+  xhr?: XMLHttpRequest;
+  onConflict: "ask" | "rename";
+  samples: { t: number; b: number }[];
+};
 
 const CONCURRENCY = 3;
 const RETRIES = 4;
@@ -84,6 +90,22 @@ async function api<T>(url: string, init: RequestInit = {}): Promise<{ status: nu
   return { status: res.status, body };
 }
 
+/** Nur die anzeigbaren Felder (ohne File, XHR, interne Zustände). */
+const publicItem = (i: Internal): UploadItem => ({
+  key: i.key,
+  name: i.name,
+  folder: i.folder,
+  relativeDir: i.relativeDir,
+  size: i.size,
+  loaded: i.loaded,
+  speed: i.speed,
+  status: i.status,
+  error: i.error,
+  path: i.path,
+  suggestion: i.suggestion,
+  resumed: i.resumed,
+});
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export class UploadQueue {
@@ -91,12 +113,21 @@ export class UploadQueue {
   private snapshot: UploadItem[] = [];
   private listeners = new Set<() => void>();
   private notifyTimer: ReturnType<typeof setTimeout> | null = null;
+  private doneListeners = new Set<(path: string, folder: string) => void>();
 
-  constructor(private onFinished: (path: string, folder: string) => void) {}
+  /** Benachrichtigung, sobald eine Datei fertig in Nextcloud liegt (zum Nachladen der Liste). */
+  onFinished = (fn: (path: string, folder: string) => void) => {
+    this.doneListeners.add(fn);
+    return () => {
+      this.doneListeners.delete(fn);
+    };
+  };
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
   };
 
   getSnapshot = () => this.snapshot;
@@ -105,7 +136,7 @@ export class UploadQueue {
   private notify(immediate = true) {
     const flush = () => {
       this.notifyTimer = null;
-      this.snapshot = this.items.map(({ file: _f, xhr: _x, uploadId: _u, onConflict: _o, samples: _s, ...rest }) => ({ ...rest }));
+      this.snapshot = this.items.map(publicItem);
       for (const l of this.listeners) l();
     };
     if (immediate) {
@@ -229,7 +260,7 @@ export class UploadQueue {
       it.speed = 0;
       it.path = body.path;
       this.notify();
-      this.onFinished(body.path, it.folder);
+      for (const fn of this.doneListeners) fn(body.path, it.folder);
     } catch (err) {
       if (it.status !== "läuft") return; // pausiert/abgebrochen
       it.status = "fehler";

@@ -39,7 +39,11 @@ export async function POST(request: Request) {
         const moved: string[] = [];
         for (const p of op.paths) moved.push(await moveEntry(p, op.to));
         const target = op.to === "/" ? "Dateien" : op.to.split("/").at(-1);
-        return Response.json({ ok: true, paths: moved, message: `${moved.length === 1 ? "1 Eintrag" : `${moved.length} Einträge`} nach „${target}“ verschoben` });
+        return Response.json({
+          ok: true,
+          paths: moved,
+          message: `${moved.length === 1 ? "1 Eintrag" : `${moved.length} Einträge`} nach „${target}“ verschoben`,
+        });
       }
       case "delete": {
         const n = await deleteEntries(op.paths);
