@@ -10,9 +10,15 @@ export type AccessConfig = { demo: boolean; requireTailscale: boolean; allowedUs
 export type TailnetIdentity = { ownerId: string; logins: Record<string, string> };
 export type AccessDecision = { allowed: true; user: string | null } | { allowed: false; status: 401 | 403; reason: string };
 
+/**
+ * Freigabe-Links aus „Dateien“ (`/d/<token>`, `/d/<token>/download`, `/d/<token>/bild`). Das Token ist die Berechtigung;
+ * Tailscale Funnel macht genau diese Pfade öffentlich. Ein POST kommt nur vom Passwortformular der Seite selbst.
+ */
+export const SHARE_PATH = /^\/d\/[A-Za-z0-9_-]{43}(\/(download|bild))?$/;
+
 /** Pfade mit eigener Authentifizierung bzw. ohne sensible Daten. */
 // Icons vollständig verankert, damit künftige Routen wie „/icons-…“ nicht versehentlich öffentlich werden
-const PUBLIC_PATHS = [/^\/api\/health$/, /^\/api\/ingest\//, /^\/api\/jobs\//, /^\/manifest\.webmanifest$/, /^\/icon\.svg$/, /^\/apple-icon$/];
+const PUBLIC_PATHS = [/^\/api\/health$/, /^\/api\/ingest\//, /^\/api\/jobs\//, /^\/manifest\.webmanifest$/, /^\/icon\.svg$/, /^\/apple-icon$/, SHARE_PATH];
 
 /**
  * Allowlist-Einträge: ein Login (`name@github`), eine Tailscale-Nutzer-ID (Ziffern) oder `owner` (Besitzer dieses
