@@ -4,10 +4,19 @@
  */
 
 export type AgentEvent = { title: string; start: string; end: string; allDay: boolean; location: string | null; calendar: string };
-export type AgentBriefingData = { day: string; events: AgentEvent[] | null; calendarStatus: "ok" | "unconfigured" | "error"; hint?: string };
+export type AgentBriefingData = {
+  day: string;
+  events: AgentEvent[] | null;
+  /** nur mit `days`: Termine pro Tag ab heute */
+  days?: { day: string; events: AgentEvent[] }[];
+  calendarStatus: "ok" | "unconfigured" | "error";
+  hint?: string;
+};
 
-export async function fetchLifeosBriefing(url: string, token: string, fetchFn: typeof fetch = fetch): Promise<AgentBriefingData> {
-  const res = await fetchFn(`${url.replace(/\/$/, "")}/api/jobs/agent-briefing`, {
+/** `days` (1–7): zusätzlich Termine pro Tag ab heute, für das Kalender-Tool im Chat. */
+export async function fetchLifeosBriefing(url: string, token: string, fetchFn: typeof fetch = fetch, days?: number): Promise<AgentBriefingData> {
+  const query = days ? `?days=${days}` : "";
+  const res = await fetchFn(`${url.replace(/\/$/, "")}/api/jobs/agent-briefing${query}`, {
     headers: { Authorization: `Bearer ${token}` },
     signal: AbortSignal.timeout(20_000),
   });

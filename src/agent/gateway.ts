@@ -12,10 +12,11 @@ import { parseExplicitJob, parseScheduleRules, parseScheduleWithLlm, type Parsed
 import { createJob, deleteJob, getJob, listJobs, updateJob } from "./scheduler/scheduler.ts";
 import type { Messenger, TgCallbackQuery, TgUpdate } from "./telegram/api.ts";
 import { escapeHtml, markdownToHtml } from "./telegram/format.ts";
-import { looksLikeSchedule, matchToolIntent, pickToolWithLlm } from "./tools/intents.ts";
+import { calendarContext, CALENDAR_MAX_DAYS, loadCalendar } from "./tools/calendar.ts";
+import { looksLikeSchedule, matchToolIntent, mentionsCalendar, pickToolWithLlm } from "./tools/intents.ts";
 import { formatSystemStatus, readSystemStatus } from "./tools/system.ts";
 import { webChatId } from "./web/messenger.ts";
-import { formatTime, relativeTime } from "../lib/time.ts";
+import { formatTime, relativeTime, today } from "../lib/time.ts";
 
 /**
  * Gateway für Telegram und den Web-Chat im Dashboard. Telegram: nur Luis' User-ID wird bedient, alles andere still
@@ -25,6 +26,7 @@ import { formatTime, relativeTime } from "../lib/time.ts";
 
 export const HELP = `<b>LifeOS-Agent</b>
 /status – Serverwerte (ohne KI)
+/termine – Kalender der nächsten 7 Tage
 /jobs – geplante Jobs
 /job_add &lt;Text&gt; – z. B. „jeden Freitag um 16 Uhr an Wäsche“ oder „0 16 * * 5 | Wäsche“
 /job_edit &lt;id&gt; &lt;cron&gt; | &lt;Text&gt; – Zeit und/oder Text ändern
@@ -33,10 +35,11 @@ export const HELP = `<b>LifeOS-Agent</b>
 /quota – Claude-Kontingent und Warteschlange
 /help – diese Hilfe
 
-Freitext: „Status“, „Starte Minecraft neu“, „Logs von ollama 50“, „Backup minecraft“, „Aufgabe: …“, „Erinner mich …“ oder einfach fragen.`;
+Freitext: „Status“, „Termine morgen“, „Was hab ich heute vor?“, „Starte Minecraft neu“, „Logs von ollama 50“, „Backup minecraft“, „Aufgabe: …“, „Erinner mich …“ oder einfach fragen.`;
 
 export const COMMANDS = [
   { command: "status", description: "Serverwerte" },
+  { command: "termine", description: "Kalender (7 Tage)" },
   { command: "jobs", description: "Geplante Jobs" },
   { command: "job_add", description: "Job anlegen" },
   { command: "job_edit", description: "Job ändern" },
@@ -79,6 +82,8 @@ export type GatewayDeps = {
   local: Provider;
   claude: ClaudeProvider;
   now?: () => number;
+  /** für Tests (Kalender über LifeOS) */
+  fetch?: typeof fetch;
 };
 
 /** Nachrichten, die älter sind (z. B. nach längerem Ausfall), werden nicht mehr ausgeführt. */
@@ -166,7 +171,7 @@ export class Gateway {
     if (text.startsWith("/")) return this.onCommand(chatId, text);
 
     // Stufe 1: Regeln – ohne LLM
-    const intent = matchToolIntent(text, [...serviceMap(this.d.cfg).keys()]);
+    const intent = matchToolIntent(text, [...serviceMap(this.d.cfg).keys()], new Date(this.now()), this.tz);
     if (intent) {
       this.logRule(text, `Regel → Tool ${intent.tool}`);
       return this.d.confirm.request(chatId, intent.tool, intent.params);
@@ -186,12 +191,23 @@ export class Gateway {
         }
       }
       // Server-Fragen ohne passendes Tool: aktuelle Messwerte als Daten mitgeben
-      const context = c.category === "server" ? formatSystemStatus(await readSystemStatus()) : undefined;
+      const context =
+        c.category === "server" ? formatSystemStatus(await readSystemStatus()) : mentionsCalendar(text) ? await this.calendarData() : undefined;
       const answer = await this.d.router.answer(chatId, text, c, reason, { context });
       const body = answer.decision.provider === "local" || answer.queuedId ? escapeHtml(answer.text) : markdownToHtml(answer.text);
       await this.d.tg.send(chatId, answer.notice ? `${body}\n\n<i>${escapeHtml(answer.notice)}</i>` : body);
     } finally {
       stopTyping();
+    }
+  }
+
+  /** Termine der nächsten 7 Tage als Daten für die Antwort; fehlt der Kalender, sagt der Text warum. */
+  private async calendarData(): Promise<string> {
+    try {
+      const days = await loadCalendar(this.d.cfg, 0, CALENDAR_MAX_DAYS, this.d.fetch);
+      return calendarContext(days, today(this.tz, new Date(this.now())), this.tz);
+    } catch (err) {
+      return `Kalender nicht verfügbar: ${(err as Error).message}`;
     }
   }
 
@@ -221,6 +237,10 @@ export class Gateway {
         await this.d.confirm.request(chatId, "system_status", {});
         return;
       }
+      case "termine":
+      case "kalender":
+        await this.d.confirm.request(chatId, "calendar_events", { offset: 0, days: CALENDAR_MAX_DAYS });
+        return;
       case "jobs":
         await this.d.tg.send(chatId, this.jobsText());
         return;
