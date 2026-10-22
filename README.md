@@ -35,6 +35,8 @@ Runs 24/7 on a 5 € VPS and is reachable **only inside my Tailscale network**.
 | 📊 **Weekly review** | local data + OpenAI | Sunday push and page: habits, study time (plan vs. actual), flashcards, sleep and new grades, with a short AI comment |
 | ❤️ **Health** | iPhone Shortcut → Apple Health | Daily automation posts steps, sleep, workouts, energy, resting HR; manual entry; 14/30/90-day charts |
 | 🧑‍💻 **GitHub** | GraphQL API | Contribution heatmap, recently pushed repos with CI status, open PRs |
+| 🛡️ **Pi-hole** | Pi-hole v6 API | Queries and blocked share today, top blocked domains; pause 5/30 min or until re-enabled, own allow/deny lists (exact or regex), gravity update – on the **Server** page, as a widget and from the agent (with confirm button) |
+| ☁️ **Nextcloud** | OCS + WebDAV | Used and free space on the data disk, recently changed files with deep links, upload from LifeOS (never overwrites) |
 | 🎵 **Music** | Spotify Web API | Now playing, recently played, top artists (PKCE, dev-mode-compatible endpoints only) |
 | 📰 **News** | RSS / Atom | Tagesschau, politics, regional (rbb24), blue-light reports, heise, The Verge, Hacker News – thumbnails (feed media or the article's `og:image`), category tabs, local stories pinned |
 
@@ -125,6 +127,8 @@ Scheduler (agent.db, Europe/Berlin) ──► Telegram
 | `system_status`, `service_status`, `service_logs` (≤ 100 lines), `minecraft_status` | no |
 | `calendar_events` – Google Calendar, read-only, today up to 7 days ahead (via `GET /api/jobs/agent-briefing?days=N`) | no |
 | `service_restart`, `minecraft_say`, `minecraft_restart`, `backup_run`, `git_pull_project` | **yes** – exact command in the preview |
+| `pihole_status`, `nextcloud_status` – via `GET /api/jobs/homeserver` (LifeOS holds the credentials) | no |
+| `pihole_pause` (1–1440 min or until re-enabled), `pihole_resume`, `pihole_domain` (allow/deny, add/remove), `pihole_gravity` – via `POST /api/jobs/homeserver` | **yes** – exact change in the preview |
 | `run_task` – delegates to `claude -p` with `Read/Glob/Grep/Edit/Write` (no shell) in `/var/lib/lifeos-agent/workspace` | **yes** – with Claude's plan as preview |
 
 **Default jobs** (each switchable in `agent.env`): morning briefing weekdays 06:30 / weekends 09:00 (Notion "today" + overdue tasks by priority, today's calendar events via `GET /api/jobs/agent-briefing`, one server line only if something is off – missing integrations are skipped with a hint); health check every 15 min that only messages on problems (disk > 85 %, RAM > 90 % for > 10 min, service/Minecraft down, CPU > 80 °C; max once per hour per problem) plus a 21:00 summary; study reminder Mon–Thu 16:30. Jobs survive restarts; a missed run is caught up once if it is at most 1 h old.

@@ -36,7 +36,7 @@ describe("LifeOS-MCP", () => {
     const list = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
     const tools = list.result.tools as { name: string; annotations: { readOnlyHint: boolean; destructiveHint: boolean } }[];
     const ro = Object.fromEntries(tools.map((t) => [t.name, t.annotations.readOnlyHint]));
-    expect(ro).toMatchObject({ get_overview: true, list_habits: true, set_habit_done: false, create_reminder: false, add_grade: false, add_flashcards: false });
+    expect(ro).toMatchObject({ get_overview: true, list_habits: true, set_habit_done: false, create_reminder: false, add_grade: false, add_flashcards: false, get_homeserver_status: true });
     expect(tools.every((t) => t.annotations.destructiveHint === false)).toBe(true);
     expect(tools.some((t) => /delete|remove/.test(t.name))).toBe(false);
   });
@@ -111,5 +111,12 @@ describe("LifeOS-MCP", () => {
     expect(data).toHaveLength(3);
     expect(data.at(-1)).toMatchObject({ day: today(), mood: 4, sleep: 7.5 });
     expect((await call("log_health", {})).isError).toBe(true);
+  });
+
+  it("liefert den Homeserver-Status (Demo-Daten)", async () => {
+    const { data } = await call<{ pihole: { blocking: { enabled: boolean } }; nextcloud: { version: string; recent_files: unknown[] } }>("get_homeserver_status");
+    expect(data.pihole.blocking.enabled).toBe(true);
+    expect(data.nextcloud.version).toBe("35.0.2");
+    expect(data.nextcloud.recent_files.length).toBeGreaterThan(0);
   });
 });

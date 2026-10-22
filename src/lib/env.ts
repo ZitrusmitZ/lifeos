@@ -40,6 +40,17 @@ const schema = z.object({
 
   GITHUB_TOKEN: optional,
 
+  // Homeserver: Pi-hole und Nextcloud im Docker-Netz `homeserver_default` (intern), Links über `tailscale serve`
+  PIHOLE_URL: optional,
+  /** App-Passwort aus Pi-hole → Einstellungen → Web-Oberfläche/API (nicht das Login-Passwort) */
+  PIHOLE_APP_PASSWORD: optional,
+  PIHOLE_PUBLIC_URL: optional,
+  NEXTCLOUD_URL: optional,
+  NEXTCLOUD_USER: optional,
+  /** `occ user:auth-tokens:add <user>` – widerrufbar, nie das Login-Passwort */
+  NEXTCLOUD_APP_PASSWORD: optional,
+  NEXTCLOUD_PUBLIC_URL: optional,
+
   // Mail-Sortierung (KI) und geplante Jobs
   OPENAI_API_KEY: optional,
   OPENAI_MODEL: z.preprocess(emptyAsUnset, z.string().default("gpt-6-luna")),

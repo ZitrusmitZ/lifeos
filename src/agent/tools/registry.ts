@@ -8,6 +8,7 @@ import { formatCalendar, loadCalendar } from "./calendar.ts";
 import { describeCommand, helperCommand, SAFE_NAME, tail, type Runner } from "./exec.ts";
 import { formatSystemStatus, readSystemStatus } from "./system.ts";
 import { today } from "../../lib/time.ts";
+import { HOMESERVER_TOOLS } from "./homeserver.ts";
 
 /**
  * Alle Server-Tools als feste Funktionen mit typisierten Parametern. Neue Tools nur hier im Code –
@@ -127,6 +128,7 @@ export const TOOLS = [
       return runHelper({ ...ctx, dryRun: false }, "mc-status");
     },
   }),
+  ...HOMESERVER_TOOLS,
   defineTool({
     name: "calendar_events",
     kind: "read",

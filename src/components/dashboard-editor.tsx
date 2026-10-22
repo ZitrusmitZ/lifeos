@@ -4,6 +4,7 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronUp,
+  Cloud,
   CloudSun,
   GitBranch,
   GraduationCap,
@@ -16,6 +17,7 @@ import {
   Music,
   Newspaper,
   NotebookPen,
+  ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 import { useOptimistic, useTransition } from "react";
@@ -38,6 +40,8 @@ const ICONS: Record<WidgetId, [LucideIcon, string]> = {
   github: [GitBranch, "var(--cat-github)"],
   cards: [Layers, "var(--cat-cards)"],
   grades: [Award, "var(--cat-grades)"],
+  pihole: [ShieldCheck, "var(--cat-habits)"],
+  cloud: [Cloud, "var(--cat-inbox)"],
 };
 
 const MODES: { value: WidgetMode; label: string }[] = [

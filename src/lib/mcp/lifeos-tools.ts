@@ -8,6 +8,9 @@ import { listHabits, toggleHabit } from "@/lib/habits";
 import { healthSeries, METRIC_KEYS, METRICS, upsertHealth, type HealthValues } from "@/lib/health";
 import { completeReminder, createReminder, listReminders } from "@/lib/one-off-reminders";
 import { getSettings } from "@/lib/settings";
+import { resolve } from "@/integrations/core";
+import { nextcloud } from "@/integrations/nextcloud";
+import { pihole } from "@/integrations/pihole";
 import { todaysSessions, toggleSession } from "@/lib/study";
 import { formatTime, lastDays, today, zonedToEpoch } from "@/lib/time";
 import { defineTool, type McpServerInfo, type McpToolAnnotations } from "./server";
@@ -303,6 +306,33 @@ export const lifeosTools = [
       if (!Object.keys(v).length) throw new Error("Mindestens einen Wert angeben (steps, sleep, workout, energy, heart, mood).");
       const d = day ?? todayStr();
       return { day: d, saved: upsertHealth(db(), d, v, "manual") };
+    },
+  }),
+
+  // ─── Homeserver ──────────────────────────────────────────────────────
+  defineTool({
+    name: "get_homeserver_status",
+    description:
+      "Pi-hole (Werbeblocker an/aus, geblockte Anfragen heute, Top-geblockte Domains) und Nextcloud (belegter/freier Speicher, zuletzt geänderte Dateien). Nur lesen – Steuern geht in LifeOS unter /server.",
+    input: z.object({}),
+    annotations: READS,
+    async run() {
+      const [p, c] = await Promise.all([resolve(pihole, undefined), resolve(nextcloud, undefined)]);
+      return {
+        pihole:
+          p.status === "ok"
+            ? { blocking: p.data.blocking, today: p.data.summary, top_blocked: p.data.topBlocked.slice(0, 5) }
+            : { status: p.status, message: p.status === "error" ? p.message : p.hint },
+        nextcloud:
+          c.status === "ok"
+            ? {
+                version: c.data.status.version,
+                used_bytes: c.data.quota.usedBytes,
+                free_bytes: c.data.info?.freeBytes ?? null,
+                recent_files: c.data.recent.slice(0, 5).map(({ name, path, modifiedAt }) => ({ name, path, modified: modifiedAt })),
+              }
+            : { status: c.status, message: c.status === "error" ? c.message : c.hint },
+      };
     },
   }),
 ];
