@@ -76,11 +76,7 @@ function demoPermissions(sub?: string): Record<string, unknown> {
 
 const store = () => (g.__agentDemo ??= seed());
 
-<<<<<<< HEAD
-export function demoAgentRequest(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): AgentReply {
-=======
-export function demoAgentRequest(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): AgentReply {
->>>>>>> origin/main
+export function demoAgentRequest(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): AgentReply {
   const st = store();
   const url = new URL(path, "http://agent");
   const parts = url.pathname.split("/").filter(Boolean);
