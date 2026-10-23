@@ -16,8 +16,9 @@ import { Router } from "./router.ts";
 import { seedDefaultJobs, Scheduler, type Job } from "./scheduler/scheduler.ts";
 import { TelegramApi } from "./telegram/api.ts";
 import { escapeHtml, markdownToHtml } from "./telegram/format.ts";
-import { ApprovalBroker, startApprovalServer, type ApprovalEndpoint } from "./mcp/approvals.ts";
-import { execRunner } from "./tools/exec.ts";
+import { ApprovalBroker, startApprovalServer, type ApprovalEndpoint, type RootRunner } from "./mcp/approvals.ts";
+import { CoderSessions } from "./coder/sessions.ts";
+import { execRunner, helperCommand } from "./tools/exec.ts";
 import { ChannelMessenger, pushChatId, WebMessenger } from "./web/messenger.ts";
 import { startWebServer } from "./web/server.ts";
 
@@ -103,21 +104,38 @@ async function main(): Promise<void> {
     tz: cfg.AGENT_TZ,
     localTimeoutMs: cfg.OLLAMA_TIMEOUT_MS,
   });
+  const coder = new CoderSessions({ db, cfg, run: execRunner, msg: tg, approveScript: approveOpts.approveScript });
   const toolCtx = {
     cfg,
     run: execRunner,
     dryRun: cfg.AGENT_DRY_RUN,
     claude,
+    coder,
     rememberDeploy: (id: number) => setKv(db, KV_PENDING_DEPLOY, JSON.stringify({ chatId: id, at: Date.now() })),
   };
   const confirm = new ConfirmFlow(db, tg, toolCtx);
-  const approvals = cfg.AGENT_CONNECTORS || cfg.AGENT_TASK_SHELL ? new ApprovalBroker(db, tg) : undefined;
-  if (approvals) {
-    approvalEndpoint = await startApprovalServer(path.join(cfg.AGENT_DATA_DIR, "approve.sock"), approvals).catch((err) => {
+  // Root-Befehle aus Claude-Läufen (root_command): erst nach Klick, dann über den Helfer außerhalb der Sandbox
+  const runRoot: RootRunner | undefined = cfg.AGENT_ROOT_EXEC
+    ? async (grant, command) => {
+        if (cfg.AGENT_DRY_RUN) return { code: 0, output: "Dry-Run – nicht ausgeführt" };
+        const cmd = helperCommand(cfg.AGENT_HELPER, "root-exec", [grant]);
+        const res = await execRunner(cmd.file, cmd.args, { input: command, timeoutMs: 31 * 60_000 });
+        return { code: res.code, output: (res.stdout || res.stderr).slice(-20_000) };
+      }
+    : undefined;
+  const approvals = new ApprovalBroker(db, tg);
+  let coderEndpoint: ApprovalEndpoint | null = null;
+  if (cfg.AGENT_CONNECTORS || cfg.AGENT_TASK_SHELL) {
+    approvalEndpoint = await startApprovalServer(path.join(cfg.AGENT_DATA_DIR, "approve.sock"), approvals, { runRoot }).catch((err) => {
       log.warn("approve", `Freigabe-Socket nicht gestartet – Connectors und Befehle in run_task aus: ${(err as Error).message}`);
       return null;
     });
   }
+  // Coding-Agents laufen als Luis: eigener Socket (für alle verbindbar), Zugang nur mit dem Token ihrer Sitzung
+  coderEndpoint = await startApprovalServer(cfg.AGENT_CODER_SOCKET, approvals, { auth: coder.tokenAuth, mode: 0o666, runRoot }).catch((err) => {
+    log.warn("coder", `Freigabe-Socket für Coding-Agents nicht gestartet (${cfg.AGENT_CODER_SOCKET}): ${(err as Error).message}`);
+    return null;
+  });
   const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals });
   if (approvalEndpoint && cfg.AGENT_CONNECTORS) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
   const sampler = new MemSampler();
@@ -183,6 +201,7 @@ async function main(): Promise<void> {
     if (ticks % 2 === 1) sampler.sample(); // jede Minute
     await scheduler.tick().catch((err) => log.error("scheduler", (err as Error).message));
     await confirm.sweep().catch((err) => log.error("confirm", (err as Error).message));
+    await coder.poll().catch((err) => log.error("coder", (err as Error).message));
     await gateway.drainQueue().catch((err) => log.error("queue", (err as Error).message));
     if (ticks % 10 === 0) {
       state.ollama = await local.check(cfg.OLLAMA_MODEL); // alle 5 Min
@@ -225,6 +244,7 @@ async function main(): Promise<void> {
     server?.close();
     webServer?.close();
     approvalEndpoint?.server.close();
+    coderEndpoint?.server.close();
     setTimeout(() => {
       db.close();
       process.exit(0);

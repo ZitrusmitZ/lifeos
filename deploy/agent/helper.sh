@@ -15,6 +15,14 @@ DEPLOY_DIR="/opt/lifeos"
 DEPLOY_BRANCH="main"
 DEPLOY_IMAGE="ghcr.io/zitrusmitz/lifeos"
 DEPLOY_CONTAINER="lifeos"
+ROOT_EXEC="false"
+ROOT_EXEC_LOG="/var/log/lifeos-agent/root-exec.log"
+AGENT_DATA="/var/lib/lifeos-agent"
+CODE_REPOS=""
+CODE_USER="luis"
+CODE_MAX="2"
+CODE_STATE="/var/lib/lifeos-coder"
+CODE_RUNNER="/opt/lifeos-agent/src/agent/coder/run.ts"
 # shellcheck source=/dev/null
 [[ -f "$CONF" && "$(stat -c %u "$CONF")" == 0 ]] && . "$CONF"
 
@@ -143,6 +151,56 @@ case "$verb" in
     # 10 s Verzögerung, damit die Antwort noch im Chat ankommt
     systemd-run --quiet --collect --unit="lifeos-agent-update-$stamp" --on-active=10 /usr/bin/bash "$DEPLOY_DIR/scripts/install_agent.sh"
     echo "Agent-Update startet in 10 s (journalctl -u lifeos-agent-update-$stamp)"
+    ;;
+  root-exec)
+    # Beliebiger Befehl als root – nur nach Luis' Klick im Chat (die Freigabe-ID kommt aus dem Agenten).
+    # Läuft per systemd-run AUSSERHALB der Sandbox des Agent-Dienstes; Audit-Log gehört root, der Agent kann es nicht ändern.
+    [[ "$ROOT_EXEC" == "true" ]] || die "Root-Befehle sind aus (ROOT_EXEC in $CONF)"
+    id="${1:-}"; [[ "$id" =~ ^[0-9a-f]{12}$ ]] || die "ungültige Freigabe-ID"
+    cmd="$(head -c 8193)"
+    (( ${#cmd} <= 8192 )) || die "Befehl zu lang (max. 8 KB)"
+    [[ -n "${cmd//[[:space:]]/}" ]] || die "leerer Befehl"
+    install -d -m 750 -o root -g lifeos "$(dirname "$ROOT_EXEC_LOG")"
+    sha="$(printf '%s' "$cmd" | sha256sum | cut -c1-16)"
+    { printf '%s start id=%s sha=%s\n' "$(date -Is)" "$id" "$sha"; printf '%s\n' "$cmd" | sed 's/^/  | /'; } >>"$ROOT_EXEC_LOG"
+    set +e
+    systemd-run --quiet --pipe --wait --collect --unit="lifeos-root-$id" -p RuntimeMaxSec=1800 \
+      -E HOME=/root -E PATH="$PATH" -E LANG=C.UTF-8 /bin/bash -c "$cmd" </dev/null 2>&1 | head -c 200000
+    rc="${PIPESTATUS[0]}"
+    set -e
+    printf '%s end id=%s rc=%s\n' "$(date -Is)" "$id" "$rc" >>"$ROOT_EXEC_LOG"
+    exit "$rc"
+    ;;
+  code-start)
+    # Coding-Agent (Claude Code) als $CODE_USER in eigenem Worktree starten. Aufgabe + Freigabe-Konfiguration legt der
+    # Agent in $AGENT_DATA/coder/<id>/ ab; gelesen wird mit den Rechten von lifeos (keine Symlink-Tricks auf Root-Dateien).
+    name_ok "${1:-}"; repo_dir="$(lookup "$1" "$CODE_REPOS")" || die "Repo nicht erlaubt: $1"
+    id="${2:-}"; [[ "$id" =~ ^[0-9a-f]{12}$ ]] || die "ungültige ID"
+    # $repo_dir liegt meist unter /home – das sieht der Helfer nicht (ProtectHome des Agent-Dienstes); prüft der Runner
+    [[ "$repo_dir" == /* && "$repo_dir" != *..* ]] || die "CODE_REPOS: $repo_dir muss ein absoluter Pfad sein"
+    id -u "$CODE_USER" >/dev/null 2>&1 || die "Nutzer $CODE_USER fehlt"
+    [[ -f "$CODE_RUNNER" && "$(stat -c %u "$CODE_RUNNER")" == 0 ]] || die "$CODE_RUNNER fehlt oder gehört nicht root"
+    active="$(systemctl list-units --type=service --state=active,activating --no-legend --plain 'lifeos-coder-*' | wc -l)"
+    (( active < CODE_MAX )) || die "Schon $active Coding-Agents aktiv (max. $CODE_MAX)"
+    dir="$CODE_STATE/$id"; [[ ! -e "$dir" ]] || die "ID $id gibt es schon"
+    install -d -m 2750 -o "$CODE_USER" -g lifeos "$CODE_STATE"
+    install -d -m 2750 -o "$CODE_USER" -g lifeos "$dir"
+    for f in task.md approve.json; do
+      runuser -u lifeos -- head -c 65536 "$AGENT_DATA/coder/$id/$f" >"$dir/$f" || die "$f fehlt"
+      chown "$CODE_USER:lifeos" "$dir/$f"
+    done
+    chmod 640 "$dir/task.md"; chmod 600 "$dir/approve.json"
+    home="$(getent passwd "$CODE_USER" | cut -d: -f6)"
+    systemd-run --quiet --collect --unit="lifeos-coder-$id" --uid="$CODE_USER" --gid="$CODE_USER" \
+      -p MemoryMax=3G -p Nice=10 -p RuntimeMaxSec=7200 -p KillMode=mixed -p TimeoutStopSec=30 \
+      -p EnvironmentFile=-/etc/lifeos-agent/coder.env -p UMask=0027 \
+      -E CODER_STATE="$CODE_STATE" -E PATH="$home/.local/bin:/usr/local/bin:/usr/bin:/bin" \
+      /usr/local/bin/node --disable-warning=ExperimentalWarning "$CODE_RUNNER" "$repo_dir" "$id"
+    echo "lifeos-coder-$id gestartet ($1, Nutzer $CODE_USER)"
+    ;;
+  code-stop)
+    id="${1:-}"; [[ "$id" =~ ^[0-9a-f]{12}$ ]] || die "ungültige ID"
+    systemctl stop "lifeos-coder-$id.service" && echo "lifeos-coder-$id gestoppt"
     ;;
   *)
     die "unbekanntes Verb: ${verb:-<leer>}"

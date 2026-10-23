@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { request } from "node:http";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
@@ -12,27 +13,43 @@ import { isReadOnlyTool } from "./classify.ts";
  * Läuft als eigener Prozess (`node src/agent/mcp/approve-server.ts`), ohne Abhängigkeiten. Verbindung zum Agenten
  * über einen Unix-Socket (nur Nutzer lifeos) mit Einmal-Token pro Agent-Start, beides per Umgebung:
  * LIFEOS_APPROVE_SOCKET, LIFEOS_APPROVE_TOKEN, LIFEOS_APPROVE_CHAT.
+ *
+ * Mit LIFEOS_APPROVE_ROOT=1 bietet der Server zusätzlich das Tool `root_command` an: Claude kann damit einen Befehl
+ * als root ausführen lassen. Die CLI fragt dafür vorher hier nach (wie bei jedem nicht erlaubten Tool) → Luis klickt
+ * „Ausführen“ → der Agent gibt eine einmalige Freigabe für genau diesen Befehl zurück, die `root_command` einlöst.
  */
 
 type Rpc = { jsonrpc: "2.0"; id?: number | string; method: string; params?: Record<string, unknown> };
 type Decision = { behavior: "allow"; updatedInput: Record<string, unknown> } | { behavior: "deny"; message: string };
 
+export const APPROVE_SERVER = "lifeos_approve";
 export const APPROVE_TOOL = "approve";
+export const ROOT_TOOL = "root_command";
+export const ROOT_TOOL_NAME = `mcp__${APPROVE_SERVER}__${ROOT_TOOL}`;
 const WAIT_MS = 6 * 60_000;
+/** Root-Befehle dürfen lange laufen (Helfer: max. 30 Min) */
+const ROOT_WAIT_MS = 31 * 60_000;
 
-function askAgent(tool: string, input: Record<string, unknown>): Promise<{ allow: boolean; message?: string }> {
+type AskResult = { allow: boolean; message?: string; grant?: string };
+type Ask = (tool: string, input: Record<string, unknown>) => Promise<AskResult>;
+
+/** Freigaben für root_command: Hash des Befehls → Freigabe-ID (nur in diesem Prozess, einmal einlösbar) */
+const rootGrants = new Map<string, string>();
+const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+
+function post<T>(path: string, payload: Record<string, unknown>, timeout: number, fallback: (msg: string) => T): Promise<T> {
   const socketPath = process.env.LIFEOS_APPROVE_SOCKET;
   const token = process.env.LIFEOS_APPROVE_TOKEN;
   const chatId = Number(process.env.LIFEOS_APPROVE_CHAT ?? "NaN");
-  if (!socketPath || !token || !Number.isFinite(chatId)) return Promise.resolve({ allow: false, message: "Freigabe nicht eingerichtet" });
-  const body = JSON.stringify({ chatId, tool, input });
+  if (!socketPath || !token || !Number.isFinite(chatId)) return Promise.resolve(fallback("Freigabe nicht eingerichtet"));
+  const body = JSON.stringify({ chatId, ...payload });
   return new Promise((resolve) => {
     const req = request(
       {
         socketPath,
         method: "POST",
-        path: "/approve",
-        timeout: WAIT_MS,
+        path,
+        timeout,
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) },
       },
       (res) => {
@@ -41,25 +58,51 @@ function askAgent(tool: string, input: Record<string, unknown>): Promise<{ allow
         res.on("data", (c: string) => (data += c));
         res.on("end", () => {
           try {
-            resolve(JSON.parse(data) as { allow: boolean; message?: string });
+            resolve(JSON.parse(data) as T);
           } catch {
-            resolve({ allow: false, message: "ungültige Antwort vom Agenten" });
+            resolve(fallback("ungültige Antwort vom Agenten"));
           }
         });
       },
     );
     req.on("timeout", () => req.destroy(new Error("timeout")));
-    req.on("error", (err) => resolve({ allow: false, message: `Agent nicht erreichbar: ${err.message}` }));
+    req.on("error", (err) => resolve(fallback(`Agent nicht erreichbar: ${err.message}`)));
     req.end(body);
   });
 }
 
-export async function decide(toolName: string, input: Record<string, unknown>, ask = askAgent): Promise<Decision> {
+const askAgent: Ask = (tool, input) => post<AskResult>("/approve", { tool, input }, WAIT_MS, (message) => ({ allow: false, message }));
+
+export async function decide(toolName: string, input: Record<string, unknown>, ask: Ask = askAgent): Promise<Decision> {
   // nur lesende MCP-Tools ohne Rückfrage; eingebaute Tools (Bash, Read außerhalb der freigegebenen Ordner …) immer fragen
-  if (toolName.startsWith("mcp__") && isReadOnlyTool(toolName)) return { behavior: "allow", updatedInput: input };
+  if (toolName !== ROOT_TOOL_NAME && toolName.startsWith("mcp__") && isReadOnlyTool(toolName)) return { behavior: "allow", updatedInput: input };
   const res = await ask(toolName, input);
+  if (res.allow && toolName === ROOT_TOOL_NAME && typeof input.command === "string" && res.grant) rootGrants.set(sha(input.command), res.grant);
   return res.allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: res.message ?? "Von Luis abgelehnt" };
 }
+
+/** root_command: nur mit vorheriger Freigabe genau dieses Befehls; Ausführung macht der Agent über den Root-Helfer. */
+async function runRoot(input: Record<string, unknown>): Promise<string> {
+  const command = typeof input.command === "string" ? input.command : "";
+  const grant = rootGrants.get(sha(command));
+  if (!command || !grant) return "Abgelehnt: keine Freigabe für genau diesen Befehl.";
+  rootGrants.delete(sha(command));
+  const res = await post<{ ok?: boolean; code?: number; output?: string; message?: string }>("/root", { grant, command }, ROOT_WAIT_MS, (message) => ({ ok: false, message }));
+  if (res.message) return `Fehler: ${res.message}`;
+  return `Exit-Code ${res.code ?? "?"}\n${res.output ?? ""}`;
+}
+
+const ROOT_TOOL_DEF = {
+  name: ROOT_TOOL,
+  description:
+    "Einen Shell-Befehl als root auf Luis' Homeserver ausführen (bash -c, außerhalb jeder Sandbox, max. 30 Min). " +
+    "Luis muss jeden Aufruf im Chat freigeben – fasse zusammengehörige Schritte in einen Befehl. Nur verwenden, wenn root wirklich nötig ist.",
+  inputSchema: {
+    type: "object",
+    properties: { command: { type: "string", description: "bash-Befehl" }, reason: { type: "string", description: "kurz: wozu" } },
+    required: ["command", "reason"],
+  },
+};
 
 async function handle(msg: Rpc): Promise<unknown> {
   switch (msg.method) {
@@ -83,9 +126,15 @@ async function handle(msg: Rpc): Promise<unknown> {
               required: ["tool_name", "input"],
             },
           },
+          ...(process.env.LIFEOS_APPROVE_ROOT === "1" ? [ROOT_TOOL_DEF] : []),
         ],
       };
     case "tools/call": {
+      if (msg.params?.name === ROOT_TOOL) {
+        if (process.env.LIFEOS_APPROVE_ROOT !== "1") throw Object.assign(new Error("root_command ist nicht freigeschaltet"), { code: -32602 });
+        const text = await runRoot((msg.params?.arguments ?? {}) as Record<string, unknown>);
+        return { content: [{ type: "text", text: text.slice(-20_000) }] };
+      }
       const args = (msg.params?.arguments ?? {}) as { tool_name?: unknown; input?: unknown };
       const toolName = typeof args.tool_name === "string" ? args.tool_name : "";
       const input = args.input && typeof args.input === "object" ? (args.input as Record<string, unknown>) : {};

@@ -107,6 +107,16 @@ const schema = z.object({
   AGENT_GIT_PROJECTS: list("lifeos"),
   AGENT_HELPER: str("/usr/local/lib/lifeos-agent/helper"),
   AGENT_MINECRAFT_CONTAINER: str("minecraft"),
+  /** Root-Befehle per Klick (server_command, root_command in run_task/Coding-Agents). Aus heißt: Tool nicht angeboten. Der Helfer prüft ROOT_EXEC selbst. */
+  AGENT_ROOT_EXEC: bool(true),
+
+  // ── Coding-Agents (Claude Code als Luis, eigener Worktree, Ergebnis als PR) ──
+  /** Namen aus CODE_REPOS in helper.conf (der Helfer prüft selbst nochmal) */
+  AGENT_CODE_REPOS: list("lifeos"),
+  /** Status/Ergebnis der Sitzungen (schreibt der Coding-Agent, Gruppe lifeos darf lesen) */
+  AGENT_CODER_STATE: str("/var/lib/lifeos-coder"),
+  /** Freigabe-Socket für Coding-Agents (läuft als anderer Nutzer; Zugriff nur mit Token pro Sitzung) */
+  AGENT_CODER_SOCKET: str("/run/lifeos-agent/approve-coder.sock"),
 
   // ── Standard-Jobs ─────────────────────────────────────────────────
   AGENT_JOB_BRIEFING: bool(true),
