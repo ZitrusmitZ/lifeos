@@ -211,7 +211,7 @@ export function AgentLink({ className }: { className?: string }) {
   );
 }
 
-/** Dateien (Nextcloud) – am Rechner in der Kopfleiste; mobil über das Nextcloud-Widget und die Einstellungen. */
+/** Dateien (Nextcloud) – am Rechner in der Kopfleiste, mobil neben dem Zahnrad auf Heute und Schule. */
 export function FilesLink({ className }: { className?: string }) {
   const path = usePathname();
   return (
