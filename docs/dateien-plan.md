@@ -39,9 +39,9 @@ und per Link teilen, im LifeOS-Look (iOS-Karten, `ios-rows`, `SwipeRow`, `Segmen
 - `/d/[token]`: serverseitig gerendert, **ohne Client-JS und mit Inline-CSS**. Zeigt Dateiname, Größe, Typ-Icon, Vorschau bei Bildern, einen großen Download-Button und „läuft ab in …“.
   Bei Passwort kommt erst ein Formular. `/d/[token]/download` streamt mit Range-Support und zählt mit.
 - In `src/proxy.ts` ist `/d/` von der Anmeldung ausgenommen. Mit Rate-Limit pro IP, ungültige Tokens bekommen ein einheitliches 404.
-- Funnel: `tailscale funnel --bg --https=10000 --set-path=/d http://127.0.0.1:3000/d`. Öffentlich ist **nur** `/d/*`.
-  Port 443 (LifeOS) und 8443 (Nextcloud) bleiben reine Tailnet-Dienste.
-- Neue Env-Variable `SHARE_PUBLIC_URL=https://homeserver.taila65db2.ts.net:10000`, daraus wird der Link gebaut.
+- Funnel über den eigenen Container `lifeos-share` (eigener Tailnet-Name, nur `/d/` weitergereicht). **Nicht** auf dem Server-Namen:
+  Funnel macht den Namen öffentlich im DNS, dann erreichen Privat-Relay/Secure-DNS-Browser das Dashboard nicht mehr (passiert am 2026-10-23).
+- Neue Env-Variable `SHARE_PUBLIC_URL=https://lifeos-share.taila65db2.ts.net`, daraus wird der Link gebaut.
 - Standardwerte beim Teilen: Ablauf nach 7 Tagen (wählbar: 1 Tag, 7 Tage, 30 Tage, nie), kein Passwort. Ordner teilen kommt in Phase 2 (als ZIP-Stream).
 
 ### 4. Seite `/dateien` (`src/app/dateien/page.tsx` + `src/components/files/*`)
