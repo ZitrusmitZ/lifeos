@@ -9,6 +9,7 @@ import type { Messenger } from "../telegram/api.ts";
 import { escapeHtml } from "../telegram/format.ts";
 import { checkBearer } from "../web/server.ts";
 import { ROOT_TOOL_NAME } from "./approve-server.ts";
+import type { ToolGate } from "./tool-gate.ts";
 
 /**
  * Freigaben für ändernde Connector-Aktionen (Gmail, Kalender, Notion, Composio …). Der Freigabe-Server
@@ -64,8 +65,8 @@ export class ApprovalBroker {
   }
 
   /** Vorschau mit Buttons senden und auf Luis' Entscheidung warten. */
-  async request(chatId: number, tool: string, input: unknown, origin?: string): Promise<Decision> {
-    const preview = approvalPreview(tool, input);
+  async request(chatId: number, tool: string, input: unknown, origin?: string, customPreview?: string): Promise<Decision> {
+    const preview = customPreview ?? approvalPreview(tool, input);
     const id = createPending(this.db, { tool: `${APPROVAL_PREFIX}${tool}`, params: input, preview, chatId }, this.now());
     const decision = new Promise<Decision>((resolve) => {
       const timer = setTimeout(() => this.settle(id, { allow: false, message: "Keine Bestätigung innerhalb von 5 Minuten" }), CONFIRM_TIMEOUT_MS + 5_000);
@@ -136,6 +137,7 @@ export class ApprovalBroker {
 
 const bodySchema = z.object({ chatId: z.number().int(), tool: z.string().min(1).max(200), input: z.record(z.string(), z.unknown()) });
 const rootSchema = z.object({ chatId: z.number().int(), grant: z.string().regex(/^[0-9a-f]{12}$/), command: z.string().min(1).max(8192) });
+const toolSchema = z.object({ chatId: z.number().int(), name: z.string().regex(/^[a-z0-9_]{1,64}$/), params: z.record(z.string(), z.unknown()).default({}) });
 
 export type ApprovalEndpoint = { socketPath: string; token: string; server: Server };
 /** Wer mit diesem Token anfragt: Chat (fest, z. B. Coding-Agent) und Anzeige-Name; null = unbekannt. */
@@ -148,6 +150,8 @@ export type ApprovalServerOptions = {
   mode?: number;
   /** Root-Befehle nach Freigabe ausführen (`/root`); fehlt → 404 */
   runRoot?: RootRunner;
+  /** LifeOS-Tools für den Agent-Modus (`/tools`, `/tool`); fehlt → 404 */
+  tools?: Pick<ToolGate, "list" | "call">;
 };
 
 const bearer = (header: string | undefined) => header?.match(/^Bearer\s+(.+)$/)?.[1] ?? "";
@@ -162,7 +166,8 @@ export function startApprovalServer(socketPath: string, broker: ApprovalBroker, 
       res.end(JSON.stringify(body));
     };
     const route = req.method === "POST" ? req.url : undefined;
-    if (route !== "/approve" && !(route === "/root" && opts.runRoot)) return send(404, { allow: false, message: "Nicht gefunden" });
+    const known = route === "/approve" || (route === "/root" && opts.runRoot) || ((route === "/tools" || route === "/tool") && opts.tools);
+    if (!known) return send(404, { allow: false, message: "Nicht gefunden" });
     const who = auth(bearer(req.headers.authorization));
     if (!who) return send(401, { allow: false, message: "Nicht autorisiert" });
     let data = "";
@@ -177,6 +182,17 @@ export function startApprovalServer(socketPath: string, broker: ApprovalBroker, 
         json = JSON.parse(data);
       } catch {
         return send(400, { allow: false, message: "Ungültiges JSON" });
+      }
+      if (route === "/tools") return send(200, { tools: opts.tools!.list() });
+      if (route === "/tool") {
+        const parsed = toolSchema.safeParse(json);
+        if (!parsed.success) return send(400, { text: "Fehler: ungültige Anfrage" });
+        log.info("approve", `LifeOS-Tool angefragt: ${parsed.data.name}`);
+        opts.tools!.call(who.chatId ?? parsed.data.chatId, parsed.data.name, parsed.data.params).then(
+          (text) => send(200, { text }),
+          (err: Error) => send(500, { text: `Fehler: ${err.message}` }),
+        );
+        return;
       }
       if (route === "/root") {
         const parsed = rootSchema.safeParse(json);

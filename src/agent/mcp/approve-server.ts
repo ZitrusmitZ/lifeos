@@ -17,6 +17,9 @@ import { isReadOnlyTool } from "./classify.ts";
  * Mit LIFEOS_APPROVE_ROOT=1 bietet der Server zusätzlich das Tool `root_command` an: Claude kann damit einen Befehl
  * als root ausführen lassen. Die CLI fragt dafür vorher hier nach (wie bei jedem nicht erlaubten Tool) → Luis klickt
  * „Ausführen“ → der Agent gibt eine einmalige Freigabe für genau diesen Befehl zurück, die `root_command` einlöst.
+ *
+ * Mit LIFEOS_APPROVE_TOOLS=1 (Agent-Modus) kommen die LifeOS-Tools dazu (Liste und Ausführung über den Agenten,
+ * `/tools` und `/tool`); ändernde fragen dort selbst mit eigener Vorschau nach.
  */
 
 type Rpc = { jsonrpc: "2.0"; id?: number | string; method: string; params?: Record<string, unknown> };
@@ -104,6 +107,21 @@ const ROOT_TOOL_DEF = {
   },
 };
 
+type GateTool = { name: string; description: string; inputSchema: Record<string, unknown> };
+let lifeosTools: GateTool[] | null = null;
+
+async function listLifeosTools(): Promise<GateTool[]> {
+  if (process.env.LIFEOS_APPROVE_TOOLS !== "1") return [];
+  if (!lifeosTools) {
+    const res = await post<{ tools?: GateTool[] }>("/tools", {}, 15_000, () => ({ tools: [] }));
+    lifeosTools = (res.tools ?? []).filter((t) => t.name !== APPROVE_TOOL && t.name !== ROOT_TOOL);
+  }
+  return lifeosTools;
+}
+
+/** Lange Wartezeit: Freigabe (max. 5 Min) plus Laufzeit (Deploy, Backup …) */
+const TOOL_WAIT_MS = 36 * 60_000;
+
 async function handle(msg: Rpc): Promise<unknown> {
   switch (msg.method) {
     case "initialize":
@@ -127,6 +145,7 @@ async function handle(msg: Rpc): Promise<unknown> {
             },
           },
           ...(process.env.LIFEOS_APPROVE_ROOT === "1" ? [ROOT_TOOL_DEF] : []),
+          ...(await listLifeosTools()),
         ],
       };
     case "tools/call": {
@@ -134,6 +153,13 @@ async function handle(msg: Rpc): Promise<unknown> {
         if (process.env.LIFEOS_APPROVE_ROOT !== "1") throw Object.assign(new Error("root_command ist nicht freigeschaltet"), { code: -32602 });
         const text = await runRoot((msg.params?.arguments ?? {}) as Record<string, unknown>);
         return { content: [{ type: "text", text: text.slice(-20_000) }] };
+      }
+      const name = typeof msg.params?.name === "string" ? msg.params.name : "";
+      if (name !== APPROVE_TOOL) {
+        if (!(await listLifeosTools()).some((t) => t.name === name)) throw Object.assign(new Error(`Unbekanntes Tool ${name}`), { code: -32602 });
+        const params = (msg.params?.arguments ?? {}) as Record<string, unknown>;
+        const res = await post<{ text?: string }>("/tool", { name, params }, TOOL_WAIT_MS, (message) => ({ text: `Fehler: ${message}` }));
+        return { content: [{ type: "text", text: (res.text ?? "").slice(-20_000) || "(keine Ausgabe)" }] };
       }
       const args = (msg.params?.arguments ?? {}) as { tool_name?: unknown; input?: unknown };
       const toolName = typeof args.tool_name === "string" ? args.tool_name : "";
