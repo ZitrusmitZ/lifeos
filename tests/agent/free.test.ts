@@ -11,7 +11,7 @@ function fakeFetch(status: number, body: unknown, calls: Call[] = []): typeof fe
   }) as typeof fetch;
 }
 
-const opts = { enabled: true, url: "http://127.0.0.1:4000/", apiKey: "sk-test", model: "free", timeoutMs: 5000 };
+const opts = { enabled: true, url: "http://127.0.0.1:3001/", apiKey: "sk-test", model: "auto", timeoutMs: 5000 };
 
 describe("FreeLLM-Provider", () => {
   it("schickt System + Prompt im OpenAI-Format und meldet das tatsächliche Modell", async () => {
@@ -22,10 +22,10 @@ describe("FreeLLM-Provider", () => {
     });
     const res = await p.complete({ prompt: "Hi", system: "Sei knapp", model: "ignoriert" });
     expect(res).toMatchObject({ text: "Hallo", model: "groq/llama-3.3-70b-versatile" });
-    expect(calls[0].url).toBe("http://127.0.0.1:4000/v1/chat/completions");
+    expect(calls[0].url).toBe("http://127.0.0.1:3001/v1/chat/completions");
     expect((calls[0].init?.headers as Record<string, string>).authorization).toBe("Bearer sk-test");
     expect(JSON.parse(String(calls[0].init?.body))).toMatchObject({
-      model: "free",
+      model: "auto",
       messages: [
         { role: "system", content: "Sei knapp" },
         { role: "user", content: "Hi" },
@@ -51,12 +51,23 @@ describe("FreeLLM-Provider", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("Health-Check über /health/liveliness", async () => {
+  it("meldet den Anbieter aus X-Routed-Via (FreeLLMAPI)", async () => {
+    const fetchFn = (async () =>
+      new Response(JSON.stringify({ model: "auto", choices: [{ message: { content: "ok" } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json", "x-routed-via": "groq/llama-3.3-70b-versatile" },
+      })) as unknown as typeof fetch;
+    const p = new FreeProvider({ ...opts, fetchFn });
+    expect((await p.complete({ prompt: "x", model: "auto" })).model).toBe("groq/llama-3.3-70b-versatile");
+  });
+
+  it("Health-Check über /v1/models mit Key (falscher Key = nicht verfügbar)", async () => {
     const calls: Call[] = [];
-    const ok = new FreeProvider({ ...opts, fetchFn: fakeFetch(200, "ok", calls) });
+    const ok = new FreeProvider({ ...opts, fetchFn: fakeFetch(200, { data: [] }, calls) });
     expect(await ok.check()).toBe(true);
-    expect(calls[0].url).toBe("http://127.0.0.1:4000/health/liveliness");
-    const down = new FreeProvider({ ...opts, fetchFn: fakeFetch(503, "down") });
+    expect(calls[0].url).toBe("http://127.0.0.1:3001/v1/models");
+    expect((calls[0].init?.headers as Record<string, string>).authorization).toBe("Bearer sk-test");
+    const down = new FreeProvider({ ...opts, fetchFn: fakeFetch(401, { error: { message: "Invalid API key" } }) });
     expect(await down.check()).toBe(false);
     expect(down.available()).toBe(false);
   });

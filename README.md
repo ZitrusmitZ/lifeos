@@ -111,7 +111,7 @@ Telegram (long polling – no open port)
 Gateway ──► Router ──► local: Ollama (qwen2.5:3b)        trivial
    │          │        claude: `claude -p` (Pro plan)    simple → haiku · complex → sonnet · hard → opus
    │          │        api:    disabled (interface only)
-   │          │        free:   LiteLLM proxy (free tiers) – only when the Pro quota is empty
+   │          │        free:   FreeLLMAPI (free tiers, one key) – only when the Pro quota is empty
    │          ▼
    │      Tools (fixed functions) ── confirm buttons (5 min) ── audit log
    ▼
@@ -150,13 +150,17 @@ sudo bash scripts/install_agent.sh   # idempotent: Node, user `lifeos`, Ollama +
 
 ### FreeLLM fallback (free model pool)
 
-A local [LiteLLM](https://github.com/BerriAI/litellm) proxy (`deploy/litellm/`, container `litellm`, `127.0.0.1:4000` only, image pinned by digest) bundles the free tiers of Groq, Gemini, Cerebras and OpenRouter `:free` into one model group `free` and fails over on 429s. When the Pro quota is exhausted (or Claude isn't logged in), the router answers with it instead of queueing – chat only: no tools, and connector requests (mail/calendar) still wait in the queue.
+When the Pro quota is exhausted (or Claude isn't logged in), the router answers with an OpenAI-compatible free pool instead of queueing – on the home server that's FreeLLMAPI (`127.0.0.1:3001`, one key for all linked free providers, model `auto`). Chat only: no tools, and connector requests (mail/calendar) still wait in the queue. `/quota` shows its state; the reply notes which provider answered (`X-Routed-Via`).
 
 ```bash
-sudo bash scripts/install_litellm.sh   # creates /etc/litellm/litellm.env – add at least one free key, run again
+# /etc/lifeos-agent/agent.env
+ENABLE_FREE_PROVIDER=true
+FREE_LLM_URL=http://127.0.0.1:3001
+FREE_LLM_KEY=<FreeLLMAPI key>
+FREE_LLM_MODEL=auto
 ```
 
-The script generates `config.yaml` from `deploy/litellm/models.txt` (only providers with a key), starts the container, sends a probe request and enables `ENABLE_FREE_PROVIDER`/`FREE_LLM_KEY` in `agent.env`. `/quota` shows its state. Note: free tiers may use prompts for training – that's why only plain chat goes there.
+Note: free tiers may use prompts for training – that's why only plain chat goes there.
 
 ### Connectors (Gmail, Calendar, Notion, Composio …)
 

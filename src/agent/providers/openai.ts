@@ -1,9 +1,9 @@
 import { ProviderError, type CompletionRequest, type CompletionResult, type Provider } from "./types.ts";
 
 /**
- * FreeLLM: OpenAI-kompatibler Endpunkt (lokaler LiteLLM-Proxy, `deploy/litellm/`), der kostenlose Kontingente von
- * Groq, Gemini, Cerebras und OpenRouter bündelt und bei Limits selbst weiterschaltet. Springt nur ein, wenn Claude
- * gerade nicht nutzbar ist (Pro-Kontingent leer, nicht eingeloggt) – ohne Tools und ohne Connectors, reiner Chat.
+ * FreeLLM: OpenAI-kompatibler Endpunkt – Luis' FreeLLMAPI (lokal auf 127.0.0.1:3001, ein Key für alle verknüpften
+ * kostenlosen Anbieter, Modell `auto` routet selbst). Springt nur ein, wenn Claude gerade nicht nutzbar ist
+ * (Pro-Kontingent leer, nicht eingeloggt) – ohne Tools und ohne Connectors, reiner Chat.
  */
 export type FreeProviderOptions = {
   enabled: boolean;
@@ -31,11 +31,15 @@ export class FreeProvider implements Provider {
     return this.o.enabled && this.healthy;
   }
 
-  /** Läuft der Proxy? (`/health/liveliness` braucht keinen Key und fragt keine Anbieter an) */
+  private headers(): Record<string, string> {
+    return { "content-type": "application/json", ...(this.o.apiKey ? { authorization: `Bearer ${this.o.apiKey}` } : {}) };
+  }
+
+  /** Läuft der Dienst und gilt der Key? (`/v1/models` fragt keinen Anbieter an und kostet kein Kontingent) */
   async check(): Promise<boolean> {
     if (!this.o.enabled) return (this.healthy = false);
     try {
-      const res = await this.fetch(`${this.o.url}/health/liveliness`, { signal: AbortSignal.timeout(3000) });
+      const res = await this.fetch(`${this.o.url}/v1/models`, { headers: this.headers(), signal: AbortSignal.timeout(3000) });
       this.healthy = res.ok;
     } catch {
       this.healthy = false;
@@ -50,7 +54,7 @@ export class FreeProvider implements Provider {
     try {
       res = await this.fetch(`${this.o.url}/v1/chat/completions`, {
         method: "POST",
-        headers: { "content-type": "application/json", ...(this.o.apiKey ? { authorization: `Bearer ${this.o.apiKey}` } : {}) },
+        headers: this.headers(),
         body: JSON.stringify({
           model: this.o.model,
           max_tokens: 2048,
@@ -73,7 +77,8 @@ export class FreeProvider implements Provider {
     }
     const text = (json.choices?.[0]?.message?.content ?? "").trim();
     if (!text) throw new ProviderError("FreeLLM: leere Antwort");
-    // LiteLLM liefert im Feld `model` das Modell, das tatsächlich geantwortet hat (z. B. groq/llama-3.3-70b-versatile)
-    return { text, model: json.model ?? this.o.model, durationMs: Date.now() - started };
+    // FreeLLMAPI verrät im Header, welcher Anbieter tatsächlich geantwortet hat; sonst das Feld `model`
+    const routed = res.headers.get("x-routed-via")?.trim();
+    return { text, model: (routed || json.model || this.o.model).slice(0, 80), durationMs: Date.now() - started };
   }
 }

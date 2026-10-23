@@ -1,8 +1,0 @@
-# Modellgruppe „free“ für den LifeOS-Agenten: <Key-Variable> <LiteLLM-Modell> <Anfragen/Min>
-# Nur Zeilen, deren Key in /etc/litellm/litellm.env gesetzt ist, landen in der Konfiguration.
-# LiteLLM verteilt die Anfragen und schaltet bei 429/Fehlern für 5 Min auf die anderen um.
-# Modellnamen ändern sich bei den Anbietern gelegentlich – bei „model not found“ hier anpassen.
-GROQ_API_KEY        groq/llama-3.3-70b-versatile                       30
-GEMINI_API_KEY      gemini/gemini-2.5-flash                            10
-CEREBRAS_API_KEY    cerebras/llama-3.3-70b                             30
-OPENROUTER_API_KEY  openrouter/meta-llama/llama-3.3-70b-instruct:free  20

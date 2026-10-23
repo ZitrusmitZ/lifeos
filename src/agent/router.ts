@@ -82,7 +82,7 @@ export type RouterDeps = {
   local: Provider;
   claude: Provider;
   api: Provider;
-  /** FreeLLM (LiteLLM-Proxy) – optional */
+  /** FreeLLM (FreeLLMAPI) – optional */
   free?: Provider;
   localModel: string;
   models: { simple: string; complex: string; hard: string };
