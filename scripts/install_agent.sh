@@ -69,7 +69,57 @@ if [[ -z "$(envval LIFEOS_CRON_TOKEN)" && -f /opt/lifeos/.env ]]; then
   fi
 fi
 [[ -f "$ETC/helper.conf" ]] || install -m 644 "$REPO/deploy/agent/helper.conf" "$ETC/helper.conf"
+# neue Schlüssel aus der Vorlage ergänzen (bestehende Werte bleiben unangetastet)
+for key in DEPLOY_DIR DEPLOY_BRANCH DEPLOY_IMAGE DEPLOY_CONTAINER ROOT_EXEC ROOT_EXEC_LOG CODE_REPOS CODE_USER CODE_MAX; do
+  grep -q "^$key=" "$ETC/helper.conf" || grep -m1 "^$key=" "$REPO/deploy/agent/helper.conf" >>"$ETC/helper.conf"
+done
 chown root:root "$ETC/helper.conf"; chmod 644 "$ETC/helper.conf"
+
+# ── Root-Befehle + Coding-Agents ──────────────────────────────────────
+# Protokoll der Root-Befehle gehört root (der Agent kann es lesen, aber nicht ändern).
+install -d -m 750 -o root -g lifeos /var/log/lifeos-agent
+code_user="$(grep -E '^CODE_USER=' "$ETC/helper.conf" | tail -1 | cut -d= -f2- | tr -d '"')"; code_user="${code_user:-luis}"
+if id "$code_user" >/dev/null 2>&1; then
+  # Status/Verlauf der Coding-Agents: schreibt $code_user, Gruppe lifeos (Agent) liest
+  install -d -m 2750 -o "$code_user" -g lifeos /var/lib/lifeos-coder
+  # FreeLLM-Fallback für Coding-Agents: Key aus agent.env (nur root lesbar, systemd gibt ihn an die Unit)
+  {
+    echo "# erzeugt von scripts/install_agent.sh aus agent.env – nicht von Hand ändern"
+    echo "FREELLM_URL=$(envval FREE_LLM_URL)"
+    echo "FREELLM_KEY=$(envval FREE_LLM_KEY)"
+    for k in CODER_MODEL CODER_FREE_MODEL CODER_FREE_FALLBACK CODER_FORCE_FREE; do
+      v="$(envval "$k")"; if [[ -n "$v" ]]; then echo "$k=$v"; fi
+    done
+  } >"$ETC/coder.env"
+  chown root:root "$ETC/coder.env"; chmod 600 "$ETC/coder.env"
+  say "Coding-Agents laufen als $code_user (Repos: $(grep -E '^CODE_REPOS=' "$ETC/helper.conf" | cut -d= -f2-))"
+else
+  echo "  CODE_USER=$code_user existiert nicht – Coding-Agents aus" >&2
+fi
+
+# ── Ordner für run_task (AGENT_FILE_DIRS) ─────────────────────────────
+# Nur hier freigegebene Ordner sind für den Dienst beschreibbar (systemd ReadWritePaths) und für lifeos per ACL.
+command -v setfacl >/dev/null || { say "acl installieren"; apt-get install -y -qq acl >/dev/null; }
+file_dirs="$(envval AGENT_FILE_DIRS)"; file_dirs="${file_dirs:-/srv/homeserver}"
+rw_paths=()
+IFS=',' read -ra dirs <<<"$file_dirs"
+for d in "${dirs[@]}"; do
+  d="$(echo "$d" | xargs)"; d="${d%/}"
+  [[ -n "$d" ]] || continue
+  if [[ "$d" != /* || "$d" == *..* || "$d" =~ ^/(home|root|etc|usr|boot|proc|sys|dev|run|bin|sbin|lib|lib64|var/lib/lifeos-agent)(/|$) || "$d" == / ]]; then
+    echo "  AGENT_FILE_DIRS: $d übersprungen (nicht erlaubt)" >&2; continue
+  fi
+  install -d -m 755 "$d"
+  setfacl -R -m u:lifeos:rwX -m d:u:lifeos:rwX "$d"
+  rw_paths+=("$d")
+done
+install -d -m 755 /etc/systemd/system/lifeos-agent.service.d
+{
+  echo "# erzeugt von scripts/install_agent.sh aus AGENT_FILE_DIRS – nicht von Hand ändern"
+  echo "[Service]"
+  if ((${#rw_paths[@]})); then echo "ReadWritePaths=${rw_paths[*]}"; fi
+} >/etc/systemd/system/lifeos-agent.service.d/files.conf
+if ((${#rw_paths[@]})); then say "run_task darf in: ${rw_paths[*]}"; fi
 
 # ── Root-Helfer + sudoers ─────────────────────────────────────────────
 say "Root-Helfer und sudoers"

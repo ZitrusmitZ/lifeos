@@ -64,6 +64,13 @@ const schema = z.object({
   /** Arbeitsverzeichnis für `run_task` */
   AGENT_TASK_DIR: str("/var/lib/lifeos-agent/workspace"),
   /**
+   * Weitere Ordner, in denen `run_task` Dateien lesen und bearbeiten darf (absolut). Müssen für den Nutzer lifeos
+   * beschreibbar sein und in der systemd-Unit freigegeben (macht `install_agent.sh` aus dieser Liste).
+   */
+  AGENT_FILE_DIRS: list("/srv/homeserver").transform((dirs) => dirs.filter((d) => d.startsWith("/") && !d.includes(".."))),
+  /** `run_task` darf Befehle ausführen (als Nutzer lifeos) – jeder einzelne erst nach „Ausführen“ im Chat */
+  AGENT_TASK_SHELL: bool(true),
+  /**
    * claude.ai-Connectors (Gmail, Google Calendar, Notion, Composio, Canva …) für Claude-Antworten. Braucht einen
    * normalen claude.ai-Login des Nutzers lifeos (`claude auth login`) – das setup-token wird dann nicht genutzt.
    * Lesende Tools laufen sofort, ändernde erst nach „Ausführen“ im Chat.
@@ -80,13 +87,36 @@ const schema = z.object({
   AGENT_API_PRICE_IN_PER_MTOK: z.preprocess(emptyAsUnset, z.coerce.number().positive().optional()),
   AGENT_API_PRICE_OUT_PER_MTOK: z.preprocess(emptyAsUnset, z.coerce.number().positive().optional()),
 
+  // ── FreeLLM (FreeLLMAPI: ein Key, kostenlose Anbieter, OpenAI-kompatibel) ──
+  /** Springt ein, wenn das Pro-Kontingent leer ist oder Claude nicht eingeloggt ist (nur Chat, keine Tools) */
+  ENABLE_FREE_PROVIDER: bool(false),
+  FREE_LLM_URL: str("http://127.0.0.1:3001"),
+  FREE_LLM_KEY: optional,
+  /** ein Modell oder eine Liste, der Reihe nach probiert (Kontingent leer, Fehler, leere Antwort → nächstes) */
+  FREE_LLM_MODEL: str("gemini-flash,deepseek-v4-flash,llama-3.3-70b,auto"),
+  FREE_LLM_TIMEOUT_MS: num(120_000),
+  /** pro Modell der Liste; danach das nächste */
+  FREE_LLM_MODEL_TIMEOUT_MS: num(30_000),
+
   // ── Server-Tools ──────────────────────────────────────────────────
   /** Name:Art, Art = systemd | docker. Muss zu /etc/lifeos-agent/helper.conf passen (der Helfer prüft selbst nochmal). */
-  AGENT_SERVICES: list("ollama:systemd,tailscaled:systemd,playit:systemd,lifeos:docker,minecraft:docker,pihole:docker,nextcloud:docker,nextcloud-db:docker"),
+  AGENT_SERVICES: list(
+    "ollama:systemd,tailscaled:systemd,playit:systemd,lifeos:docker,minecraft:docker,pihole:docker,nextcloud:docker,nextcloud-db:docker",
+  ),
   AGENT_BACKUP_TARGETS: list("lifeos,minecraft,offsite"),
   AGENT_GIT_PROJECTS: list("lifeos"),
   AGENT_HELPER: str("/usr/local/lib/lifeos-agent/helper"),
   AGENT_MINECRAFT_CONTAINER: str("minecraft"),
+  /** Root-Befehle per Klick (server_command, root_command in run_task/Coding-Agents). Aus heißt: Tool nicht angeboten. Der Helfer prüft ROOT_EXEC selbst. */
+  AGENT_ROOT_EXEC: bool(true),
+
+  // ── Coding-Agents (Claude Code als Luis, eigener Worktree, Ergebnis als PR) ──
+  /** Namen aus CODE_REPOS in helper.conf (der Helfer prüft selbst nochmal) */
+  AGENT_CODE_REPOS: list("lifeos"),
+  /** Status/Ergebnis der Sitzungen (schreibt der Coding-Agent, Gruppe lifeos darf lesen) */
+  AGENT_CODER_STATE: str("/var/lib/lifeos-coder"),
+  /** Freigabe-Socket für Coding-Agents (läuft als anderer Nutzer; Zugriff nur mit Token pro Sitzung) */
+  AGENT_CODER_SOCKET: str("/run/lifeos-agent/approve-coder.sock"),
 
   // ── Standard-Jobs ─────────────────────────────────────────────────
   AGENT_JOB_BRIEFING: bool(true),

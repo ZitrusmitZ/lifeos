@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { addDays, localClock, zonedToEpoch } from "../../lib/time.ts";
+import { APPROVE_SERVER, APPROVE_TOOL } from "../mcp/approve-server.ts";
 import { ProviderError, QuotaError, type CompletionRequest, type CompletionResult, type Provider } from "./types.ts";
 
 /**
@@ -22,6 +23,7 @@ const STRIP_ENV = [
   "TELEGRAM_BOT_TOKEN",
   "NOTION_TOKEN",
   "LIFEOS_CRON_TOKEN",
+  "FREE_LLM_KEY",
 ];
 
 export function claudeEnv(source: Record<string, string | undefined> = process.env, opts: { storedLogin?: boolean } = {}): NodeJS.ProcessEnv {
@@ -44,15 +46,31 @@ export type ClaudeRunOptions = {
    * `mcpConfigFile`, über den jeder MCP-Aufruf läuft (`--permission-prompt-tool`).
    */
   connectors?: { mcpConfigFile: string; promptTool: string };
+  /**
+   * Nur der Freigabe-Server (keine claude.ai-Connectors): eingebaute Tools, die nicht in `tools`-Allowlist-Freigabe
+   * stehen (z. B. Bash in `run_task`), laufen erst nach „Ausführen“ im Chat.
+   */
+  approval?: { mcpConfigFile: string; promptTool: string };
+  /** zusätzliche Ordner neben cwd, in denen Datei-Tools arbeiten dürfen */
+  addDirs?: string[];
+  /** eingebaute Tools, die verfügbar, aber NICHT ohne Rückfrage erlaubt sind */
+  askTools?: string[];
+  disallowedTools?: string[];
 };
 
 export function claudeArgs(o: ClaudeRunOptions): string[] {
   const tools = o.tools ?? [];
+  const ask = o.approval ? (o.askTools ?? []) : [];
   const args = ["-p", "--output-format", "stream-json", "--verbose", "--model", o.model, "--no-session-persistence"];
   if (o.connectors) args.push("--mcp-config", o.connectors.mcpConfigFile, "--permission-prompt-tool", o.connectors.promptTool);
-  else args.push("--strict-mcp-config");
-  args.push("--tools", tools.join(","));
+  else {
+    args.push("--strict-mcp-config");
+    if (o.approval) args.push("--mcp-config", o.approval.mcpConfigFile, "--permission-prompt-tool", o.approval.promptTool);
+  }
+  args.push("--tools", [...tools, ...ask].join(","));
   if (tools.length) args.push("--allowedTools", ...tools);
+  if (o.disallowedTools?.length) args.push("--disallowedTools", ...o.disallowedTools);
+  for (const dir of o.addDirs ?? []) args.push("--add-dir", dir);
   if (o.permissionMode) args.push("--permission-mode", o.permissionMode);
   if (o.maxTurns) args.push("--max-turns", String(o.maxTurns));
   if (o.appendSystemPrompt) args.push("--append-system-prompt", o.appendSystemPrompt);
@@ -165,6 +183,8 @@ export type ClaudeProviderOptions = {
   onRateLimit?: (info: RateLimitInfo) => void;
   /** Connectors aktiv: gespeicherter claude.ai-Login statt setup-token, Freigaben über den Agenten */
   connectors?: ConnectorOptions;
+  /** Freigabe-Server für Befehle aus `run_task` (unabhängig von den Connectors) */
+  taskApproval?: ConnectorOptions;
 };
 
 export type ConnectorOptions = {
@@ -178,25 +198,39 @@ export type ConnectorOptions = {
   timeoutMs: number;
 };
 
-export const APPROVE_SERVER = "lifeos_approve";
-export const APPROVE_PROMPT_TOOL = `mcp__${APPROVE_SERVER}__approve`;
+export { APPROVE_SERVER, ROOT_TOOL_NAME } from "../mcp/approve-server.ts";
+export const APPROVE_PROMPT_TOOL = `mcp__${APPROVE_SERVER}__${APPROVE_TOOL}`;
 
 /** MCP-Konfiguration für den Freigabe-Server; als Datei (0600), damit der Token nicht in `ps` auftaucht. */
-export function writeApproveConfig(c: ConnectorOptions, endpoint: { socketPath: string; token: string }, chatId: number): string {
+export function writeApproveConfig(
+  c: ConnectorOptions,
+  endpoint: { socketPath: string; token: string },
+  chatId: number,
+  opts: { root?: boolean; file?: string } = {},
+): string {
   mkdirSync(c.tmpDir, { recursive: true, mode: 0o700 });
-  const file = path.join(c.tmpDir, `approve-${randomBytes(6).toString("hex")}.json`);
-  const config = {
+  const file = opts.file ?? path.join(c.tmpDir, `approve-${randomBytes(6).toString("hex")}.json`);
+  writeFileSync(file, JSON.stringify(approveConfig(c.approveScript, endpoint, chatId, opts.root)), { mode: 0o600 });
+  return file;
+}
+
+/** MCP-Konfiguration (`--mcp-config`) des Freigabe-Servers; `root` schaltet das Tool root_command frei. */
+export function approveConfig(approveScript: string, endpoint: { socketPath: string; token: string }, chatId: number, root = false) {
+  return {
     mcpServers: {
       [APPROVE_SERVER]: {
         type: "stdio",
         command: process.execPath,
-        args: ["--disable-warning=ExperimentalWarning", c.approveScript],
-        env: { LIFEOS_APPROVE_SOCKET: endpoint.socketPath, LIFEOS_APPROVE_TOKEN: endpoint.token, LIFEOS_APPROVE_CHAT: String(chatId) },
+        args: ["--disable-warning=ExperimentalWarning", approveScript],
+        env: {
+          LIFEOS_APPROVE_SOCKET: endpoint.socketPath,
+          LIFEOS_APPROVE_TOKEN: endpoint.token,
+          LIFEOS_APPROVE_CHAT: String(chatId),
+          ...(root ? { LIFEOS_APPROVE_ROOT: "1" } : {}),
+        },
       },
     },
   };
-  writeFileSync(file, JSON.stringify(config), { mode: 0o600 });
-  return file;
 }
 
 export class ClaudeProvider implements Provider {
@@ -257,6 +291,36 @@ export class ClaudeProvider implements Provider {
     }
   }
 
+  /** Kann `run_task` Befehle mit Freigabe ausführen? */
+  taskApprovalReady(): boolean {
+    return Boolean(this.o.taskApproval?.endpoint());
+  }
+
+  /**
+   * `run_task` mit Freigabe pro Befehl: schreibt die Konfiguration des Freigabe-Servers für diesen Chat und
+   * gibt `askTools` (z. B. Bash) frei, die erst nach Luis' Klick laufen. Ohne Freigabe-Socket: ohne `askTools`.
+   */
+  async runWithApproval(
+    prompt: string,
+    opts: ClaudeRunOptions,
+    chatId: number | undefined,
+    extra: { cwd?: string; timeoutMs?: number; onProgress?: () => void; root?: boolean } = {},
+  ): Promise<CompletionResult> {
+    const a = this.o.taskApproval;
+    const endpoint = a && chatId !== undefined ? a.endpoint() : null;
+    if (!a || !endpoint || chatId === undefined) return this.run(prompt, { ...opts, askTools: undefined, approval: undefined }, extra);
+    // root: zusätzlich das Tool root_command (jeder Aufruf nur nach Klick, einmalige Freigabe pro Befehl)
+    const file = writeApproveConfig(a, endpoint, chatId, { root: extra.root });
+    try {
+      return await this.run(prompt, { ...opts, approval: { mcpConfigFile: file, promptTool: APPROVE_PROMPT_TOOL } }, {
+        ...extra,
+        timeoutMs: Math.max(extra.timeoutMs ?? 0, a.timeoutMs),
+      });
+    } finally {
+      rmSync(file, { force: true });
+    }
+  }
+
   /** Allgemeiner Aufruf (auch für `run_task` mit eingeschränkten Tools in festem Arbeitsverzeichnis). */
   async run(
     prompt: string,
@@ -268,7 +332,7 @@ export class ClaudeProvider implements Provider {
     const { code, stderr } = await (this.o.spawnFn ?? spawnClaude)(this.o.bin, claudeArgs(opts), {
       cwd: extra.cwd,
       // MCP_TOOL_TIMEOUT: Connector-Aufrufe dürfen auf Luis' Freigabe warten (max. 5 Min)
-      env: { ...claudeEnv(process.env, { storedLogin: Boolean(this.o.connectors) }), ...(opts.connectors ? { MCP_TOOL_TIMEOUT: "360000" } : {}) },
+      env: { ...claudeEnv(process.env, { storedLogin: Boolean(this.o.connectors) }), ...(opts.connectors || opts.approval ? { MCP_TOOL_TIMEOUT: "360000" } : {}) },
       stdin: prompt,
       timeoutMs: extra.timeoutMs ?? this.o.timeoutMs,
       onLine: (line) => {

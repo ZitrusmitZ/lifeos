@@ -108,7 +108,7 @@ export class ConfirmFlow {
     let preview: string;
     try {
       await this.tg.typing(chatId);
-      preview = await tool.preview(params as never, this.ctx);
+      preview = await tool.preview(params as never, { ...this.ctx, chatId });
     } catch (err) {
       audit(this.db, { tool: tool.name, params, kind: "change", confirmed: null, status: "error", result: (err as Error).message }, this.now());
       await this.tg.send(chatId, `⚠️ ${escapeHtml((err as Error).message)}`);
@@ -167,7 +167,7 @@ export class ConfirmFlow {
   private async execute(chatId: number, tool: Tool<unknown>, params: unknown, confirmed: boolean | null): Promise<void> {
     const dry = tool.kind === "change" && this.ctx.dryRun;
     try {
-      const out = await tool.run(params as never, this.ctx);
+      const out = await tool.run(params as never, { ...this.ctx, chatId });
       audit(this.db, { tool: tool.name, params, kind: tool.kind, confirmed, status: dry ? "dry-run" : "ok", result: out }, this.now());
       log.info("tool", `${tool.name} ${dry ? "dry-run" : "ok"}`);
       await this.tg.send(chatId, tool.kind === "change" ? `✅ ${escapeHtml(tool.name)}\n${out}` : out);

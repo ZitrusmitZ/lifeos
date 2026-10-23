@@ -84,7 +84,9 @@ export type GatewayDeps = {
   confirm: ConfirmFlow;
   local: Provider;
   claude: ClaudeProvider;
-  /** Freigaben für Connector-Aktionen (nur mit AGENT_CONNECTORS) */
+  /** FreeLLM-Fallback (nur mit ENABLE_FREE_PROVIDER) */
+  free?: Provider;
+  /** Freigaben für Connector-Aktionen und Befehle aus `run_task` */
   approvals?: ApprovalBroker;
   now?: () => number;
   /** für Tests (Kalender über LifeOS) */
@@ -447,7 +449,7 @@ export class Gateway {
     const rl = lastRateLimit(this.d.db);
     const since = this.now() - 24 * 3_600_000;
     const calls = (
-      this.d.db.prepare("SELECT provider, COUNT(*) AS n FROM routing_log WHERE at >= ? AND provider IN ('local','claude','api') GROUP BY provider").all(since) as {
+      this.d.db.prepare("SELECT provider, COUNT(*) AS n FROM routing_log WHERE at >= ? AND provider IN ('local','claude','api','free') GROUP BY provider").all(since) as {
         provider: string;
         n: number;
       }[]
@@ -457,6 +459,7 @@ export class Gateway {
     return [
       `<b>Claude</b>: ${!this.d.claude.available() ? "nicht eingeloggt – nur lokaler Modus" : until ? `Kontingent leer bis ca. ${formatTime(new Date(until), this.tz)}` : "verfügbar"}`,
       rl ? `Letztes Limit-Signal: ${escapeHtml(rl.status)}${rl.type ? ` (${escapeHtml(rl.type)})` : ""}${rl.resetsAt ? `, Reset ${formatTime(new Date(rl.resetsAt), this.tz)}` : ""}` : null,
+      this.d.cfg.ENABLE_FREE_PROVIDER ? `<b>FreeLLM</b>: ${this.d.free?.available() ? "bereit (springt bei leerem Kontingent ein)" : "nicht erreichbar"}` : null,
       `Warteschlange: ${queued.length}`,
       `Anfragen (24 h): ${calls || "keine"}`,
     ]

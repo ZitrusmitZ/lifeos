@@ -11,6 +11,18 @@ ALLOWED_DOCKER=""
 MC_CONTAINER="minecraft"
 BACKUP_UNITS=""
 PROJECTS=""
+DEPLOY_DIR="/opt/lifeos"
+DEPLOY_BRANCH="main"
+DEPLOY_IMAGE="ghcr.io/zitrusmitz/lifeos"
+DEPLOY_CONTAINER="lifeos"
+ROOT_EXEC="false"
+ROOT_EXEC_LOG="/var/log/lifeos-agent/root-exec.log"
+AGENT_DATA="/var/lib/lifeos-agent"
+CODE_REPOS=""
+CODE_USER="luis"
+CODE_MAX="2"
+CODE_STATE="/var/lib/lifeos-coder"
+CODE_RUNNER="/opt/lifeos-agent/src/agent/coder/run.ts"
 # shellcheck source=/dev/null
 [[ -f "$CONF" && "$(stat -c %u "$CONF")" == 0 ]] && . "$CONF"
 
@@ -19,6 +31,23 @@ in_list() { local x="$1"; shift; for v in $*; do [[ "$v" == "$x" ]] && return 0;
 # Wert zu Schlüssel aus "a=b c=d"
 lookup() { local key="$1"; shift; for kv in $*; do [[ "${kv%%=*}" == "$key" ]] && { echo "${kv#*=}"; return 0; }; done; return 1; }
 name_ok() { [[ "$1" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.@-]{0,63}$ ]] || die "ungültiger Name"; }
+
+# ── Deploy (LifeOS-Repo + per Digest gepinntes GHCR-Image + Agent) ──
+dgit() { git -c safe.directory="$DEPLOY_DIR" -C "$DEPLOY_DIR" "$@"; }
+deploy_check() {
+  [[ -d "$DEPLOY_DIR/.git" && -f "$DEPLOY_DIR/compose.override.yaml" ]] || die "DEPLOY_DIR ($DEPLOY_DIR) ist kein LifeOS-Checkout mit compose.override.yaml"
+  [[ "$DEPLOY_BRANCH" =~ ^[a-zA-Z0-9._/-]{1,64}$ && "$DEPLOY_IMAGE" =~ ^[a-z0-9./_-]{1,128}$ ]] || die "DEPLOY_BRANCH/DEPLOY_IMAGE ungültig"
+}
+running_rev() { docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$DEPLOY_CONTAINER" 2>/dev/null | cut -c1-7; }
+wait_healthy() {
+  local s
+  for _ in $(seq 1 40); do
+    s="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$DEPLOY_CONTAINER" 2>/dev/null || true)"
+    [[ "$s" == healthy || "$s" == running ]] && return 0
+    sleep 3
+  done
+  return 1
+}
 
 verb="${1:-}"; shift || true
 case "$verb" in
@@ -66,6 +95,112 @@ case "$verb" in
   git-pull)
     name_ok "${1:-}"; dir="$(lookup "$1" "$PROJECTS")" || die "Projekt nicht erlaubt: $1"
     git -c safe.directory="$dir" -C "$dir" pull --ff-only 2>&1
+    ;;
+  deploy-preview)
+    deploy_check
+    dgit fetch --quiet origin "$DEPLOY_BRANCH" 2>&1 || die "git fetch fehlgeschlagen"
+    cur="$(dgit rev-parse --short=7 HEAD)"; new="$(dgit rev-parse --short=7 "origin/$DEPLOY_BRANCH")"
+    rev="$(running_rev || true)"
+    echo "Repo: $cur → $new · Container läuft mit ${rev:-?}"
+    if [[ "$cur" == "$new" && "$rev" == "$new" ]]; then
+      echo "Schon aktuell – ein Deploy startet nur Container und Agent neu."
+    else
+      dgit log --oneline --no-decorate -n 20 "HEAD..origin/$DEPLOY_BRANCH"
+    fi
+    if timeout 30 docker manifest inspect "$DEPLOY_IMAGE:sha-$new" >/dev/null 2>&1; then
+      echo "Image sha-$new: bereit"
+    else
+      echo "Image sha-$new: noch nicht da (Release-Build läuft?) – der Deploy wartet bis zu 10 Min darauf"
+    fi
+    ;;
+  deploy-run)
+    deploy_check
+    exec 9>/run/lock/lifeos-deploy.lock
+    flock -n 9 || die "Es läuft schon ein Deploy"
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    override="$DEPLOY_DIR/compose.override.yaml"
+    old="$(dgit rev-parse --short=7 HEAD)"
+    dgit pull --ff-only --quiet origin "$DEPLOY_BRANCH" 2>&1 || die "git pull --ff-only fehlgeschlagen (lokale Änderungen in $DEPLOY_DIR?)"
+    commit="$(dgit rev-parse --short=7 HEAD)"
+    echo "Repo: $old → $commit"
+    tag="$DEPLOY_IMAGE:sha-$commit"
+    for i in $(seq 1 60); do
+      docker pull -q "$tag" >/dev/null 2>&1 && break
+      [[ $i -eq 60 ]] && die "Image $tag nach 10 Min nicht verfügbar – Release-Workflow prüfen"
+      sleep 10
+    done
+    digest="$(docker image inspect "$tag" -f '{{range .RepoDigests}}{{println .}}{{end}}' | grep -m1 "^$DEPLOY_IMAGE@" || true)"
+    [[ -n "$digest" ]] || die "Digest für $tag nicht gefunden"
+    rev="$(docker image inspect "$tag" -f '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+    [[ "$rev" == "$commit"* ]] || die "Image-Revision $rev passt nicht zu $commit"
+    cp -a "$override" "$override.bak-$stamp"
+    rollback() {
+      cp -a "$override.bak-$stamp" "$override"
+      (cd "$DEPLOY_DIR" && docker compose up -d --no-build >/dev/null 2>&1) || true
+    }
+    sed -i -E "s#^(\s*image:\s*).*#\1$digest#" "$override"
+    echo "Pin: ${digest#*@}" | cut -c1-80
+    if ! (cd "$DEPLOY_DIR" && docker compose config --quiet && docker compose up -d --no-build --force-recreate 2>&1 | tail -5); then
+      rollback; die "docker compose up fehlgeschlagen – alter Pin wiederhergestellt"
+    fi
+    wait_healthy || { rollback; die "$DEPLOY_CONTAINER wird nicht healthy – alter Pin wiederhergestellt"; }
+    echo "$DEPLOY_CONTAINER: $(docker inspect -f '{{.State.Status}}{{if .State.Health}} ({{.State.Health.Status}}){{end}}' "$DEPLOY_CONTAINER")"
+    ls -1t "$override".bak-* 2>/dev/null | tail -n +6 | xargs -r rm -f   # die letzten 5 Backups behalten
+    docker image prune -f >/dev/null 2>&1 || true
+    # Agent-Update außerhalb des Agent-Prozesses (install_agent.sh startet ihn neu) – eigene transiente Unit,
+    # 10 s Verzögerung, damit die Antwort noch im Chat ankommt
+    systemd-run --quiet --collect --unit="lifeos-agent-update-$stamp" --on-active=10 /usr/bin/bash "$DEPLOY_DIR/scripts/install_agent.sh"
+    echo "Agent-Update startet in 10 s (journalctl -u lifeos-agent-update-$stamp)"
+    ;;
+  root-exec)
+    # Beliebiger Befehl als root – nur nach Luis' Klick im Chat (die Freigabe-ID kommt aus dem Agenten).
+    # Läuft per systemd-run AUSSERHALB der Sandbox des Agent-Dienstes; Audit-Log gehört root, der Agent kann es nicht ändern.
+    [[ "$ROOT_EXEC" == "true" ]] || die "Root-Befehle sind aus (ROOT_EXEC in $CONF)"
+    id="${1:-}"; [[ "$id" =~ ^[0-9a-f]{12}$ ]] || die "ungültige Freigabe-ID"
+    cmd="$(head -c 8193)"
+    (( ${#cmd} <= 8192 )) || die "Befehl zu lang (max. 8 KB)"
+    [[ -n "${cmd//[[:space:]]/}" ]] || die "leerer Befehl"
+    install -d -m 750 -o root -g lifeos "$(dirname "$ROOT_EXEC_LOG")"
+    sha="$(printf '%s' "$cmd" | sha256sum | cut -c1-16)"
+    { printf '%s start id=%s sha=%s\n' "$(date -Is)" "$id" "$sha"; printf '%s\n' "$cmd" | sed 's/^/  | /'; } >>"$ROOT_EXEC_LOG"
+    set +e
+    systemd-run --quiet --pipe --wait --collect --unit="lifeos-root-$id" -p RuntimeMaxSec=1800 \
+      -E HOME=/root -E PATH="$PATH" -E LANG=C.UTF-8 /bin/bash -c "$cmd" </dev/null 2>&1 | head -c 200000
+    rc="${PIPESTATUS[0]}"
+    set -e
+    printf '%s end id=%s rc=%s\n' "$(date -Is)" "$id" "$rc" >>"$ROOT_EXEC_LOG"
+    exit "$rc"
+    ;;
+  code-start)
+    # Coding-Agent (Claude Code) als $CODE_USER in eigenem Worktree starten. Aufgabe + Freigabe-Konfiguration legt der
+    # Agent in $AGENT_DATA/coder/<id>/ ab; gelesen wird mit den Rechten von lifeos (keine Symlink-Tricks auf Root-Dateien).
+    name_ok "${1:-}"; repo_dir="$(lookup "$1" "$CODE_REPOS")" || die "Repo nicht erlaubt: $1"
+    id="${2:-}"; [[ "$id" =~ ^[0-9a-f]{12}$ ]] || die "ungültige ID"
+    # $repo_dir liegt meist unter /home – das sieht der Helfer nicht (ProtectHome des Agent-Dienstes); prüft der Runner
+    [[ "$repo_dir" == /* && "$repo_dir" != *..* ]] || die "CODE_REPOS: $repo_dir muss ein absoluter Pfad sein"
+    id -u "$CODE_USER" >/dev/null 2>&1 || die "Nutzer $CODE_USER fehlt"
+    [[ -f "$CODE_RUNNER" && "$(stat -c %u "$CODE_RUNNER")" == 0 ]] || die "$CODE_RUNNER fehlt oder gehört nicht root"
+    active="$(systemctl list-units --type=service --state=active,activating --no-legend --plain 'lifeos-coder-*' | wc -l)"
+    (( active < CODE_MAX )) || die "Schon $active Coding-Agents aktiv (max. $CODE_MAX)"
+    dir="$CODE_STATE/$id"; [[ ! -e "$dir" ]] || die "ID $id gibt es schon"
+    install -d -m 2750 -o "$CODE_USER" -g lifeos "$CODE_STATE"
+    install -d -m 2750 -o "$CODE_USER" -g lifeos "$dir"
+    for f in task.md approve.json; do
+      runuser -u lifeos -- head -c 65536 "$AGENT_DATA/coder/$id/$f" >"$dir/$f" || die "$f fehlt"
+      chown "$CODE_USER:lifeos" "$dir/$f"
+    done
+    chmod 640 "$dir/task.md"; chmod 600 "$dir/approve.json"
+    home="$(getent passwd "$CODE_USER" | cut -d: -f6)"
+    systemd-run --quiet --collect --unit="lifeos-coder-$id" --uid="$CODE_USER" --gid="$CODE_USER" \
+      -p MemoryMax=3G -p Nice=10 -p RuntimeMaxSec=7200 -p KillMode=mixed -p TimeoutStopSec=30 \
+      -p EnvironmentFile=-/etc/lifeos-agent/coder.env -p UMask=0027 \
+      -E CODER_STATE="$CODE_STATE" -E PATH="$home/.local/bin:/usr/local/bin:/usr/bin:/bin" \
+      /usr/local/bin/node --disable-warning=ExperimentalWarning "$CODE_RUNNER" "$repo_dir" "$id"
+    echo "lifeos-coder-$id gestartet ($1, Nutzer $CODE_USER)"
+    ;;
+  code-stop)
+    id="${1:-}"; [[ "$id" =~ ^[0-9a-f]{12}$ ]] || die "ungültige ID"
+    systemctl stop "lifeos-coder-$id.service" && echo "lifeos-coder-$id gestoppt"
     ;;
   *)
     die "unbekanntes Verb: ${verb:-<leer>}"

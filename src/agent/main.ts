@@ -10,13 +10,15 @@ import { initFileLog, log } from "./log.ts";
 import { ApiProvider } from "./providers/api.ts";
 import { ClaudeProvider } from "./providers/claude.ts";
 import { OllamaProvider } from "./providers/ollama.ts";
+import { FreeProvider } from "./providers/openai.ts";
 import { rememberRateLimit } from "./quota.ts";
 import { Router } from "./router.ts";
 import { seedDefaultJobs, Scheduler, type Job } from "./scheduler/scheduler.ts";
 import { TelegramApi } from "./telegram/api.ts";
 import { escapeHtml, markdownToHtml } from "./telegram/format.ts";
-import { ApprovalBroker, startApprovalServer, type ApprovalEndpoint } from "./mcp/approvals.ts";
-import { execRunner } from "./tools/exec.ts";
+import { ApprovalBroker, startApprovalServer, type ApprovalEndpoint, type RootRunner } from "./mcp/approvals.ts";
+import { CoderSessions } from "./coder/sessions.ts";
+import { execRunner, helperCommand } from "./tools/exec.ts";
 import { ChannelMessenger, pushChatId, WebMessenger } from "./web/messenger.ts";
 import { startWebServer } from "./web/server.ts";
 
@@ -28,7 +30,19 @@ import { startWebServer } from "./web/server.ts";
 
 const TICK_MS = 30_000;
 
-type State = { lastPollAt: number; startedAt: number; ollama: boolean; claude: boolean; stopping: boolean; telegram: boolean; web: boolean };
+type State = {
+  lastPollAt: number;
+  startedAt: number;
+  ollama: boolean;
+  claude: boolean;
+  free: boolean;
+  stopping: boolean;
+  telegram: boolean;
+  web: boolean;
+};
+
+/** Nach `lifeos_deploy` startet der Agent neu – beim nächsten Start dem Chat Bescheid geben. */
+const KV_PENDING_DEPLOY = "pending_deploy";
 
 async function main(): Promise<void> {
   if (process.argv.includes("--dry-run")) process.env.AGENT_DRY_RUN = "true";
@@ -44,24 +58,24 @@ async function main(): Promise<void> {
   const telegram = telegramOn ? new TelegramApi(cfg.TELEGRAM_BOT_TOKEN!) : null;
   const web = new WebMessenger(db);
   const tg = new ChannelMessenger(telegram, web);
-  const state: State = { lastPollAt: 0, startedAt: Date.now(), ollama: false, claude: false, stopping: false, telegram: telegramOn, web: false };
+  const state: State = { lastPollAt: 0, startedAt: Date.now(), ollama: false, claude: false, free: false, stopping: false, telegram: telegramOn, web: false };
 
   const local = new OllamaProvider(cfg.OLLAMA_URL, cfg.OLLAMA_TIMEOUT_MS);
   let approvalEndpoint: ApprovalEndpoint | null = null;
+  const approveOpts = {
+    tmpDir: path.join(cfg.AGENT_DATA_DIR, "tmp"),
+    approveScript: path.join(import.meta.dirname, "mcp", "approve-server.ts"),
+    endpoint: () => approvalEndpoint,
+    timeoutMs: cfg.AGENT_CONNECTOR_TIMEOUT_MS,
+  };
   const claude = new ClaudeProvider({
     bin: cfg.CLAUDE_BIN,
     tz: cfg.AGENT_TZ,
     timeoutMs: cfg.CLAUDE_TIMEOUT_MS,
     maxTurns: cfg.CLAUDE_MAX_TURNS,
     onRateLimit: (info) => rememberRateLimit(db, info),
-    connectors: cfg.AGENT_CONNECTORS
-      ? {
-          tmpDir: path.join(cfg.AGENT_DATA_DIR, "tmp"),
-          approveScript: path.join(import.meta.dirname, "mcp", "approve-server.ts"),
-          endpoint: () => approvalEndpoint,
-          timeoutMs: cfg.AGENT_CONNECTOR_TIMEOUT_MS,
-        }
-      : undefined,
+    connectors: cfg.AGENT_CONNECTORS ? approveOpts : undefined,
+    taskApproval: cfg.AGENT_TASK_SHELL ? approveOpts : undefined,
   });
   const api = new ApiProvider(db, {
     enabled: cfg.ENABLE_API_PROVIDER,
@@ -71,34 +85,67 @@ async function main(): Promise<void> {
     priceInPerMTok: cfg.AGENT_API_PRICE_IN_PER_MTOK,
     priceOutPerMTok: cfg.AGENT_API_PRICE_OUT_PER_MTOK,
   });
+  const free = new FreeProvider({
+    enabled: cfg.ENABLE_FREE_PROVIDER,
+    url: cfg.FREE_LLM_URL,
+    apiKey: cfg.FREE_LLM_KEY,
+    model: cfg.FREE_LLM_MODEL,
+    timeoutMs: cfg.FREE_LLM_TIMEOUT_MS,
+    modelTimeoutMs: cfg.FREE_LLM_MODEL_TIMEOUT_MS,
+  });
   const router = new Router({
     db,
     local,
     claude,
     api,
+    free,
     localModel: cfg.OLLAMA_MODEL,
     models: { simple: cfg.CLAUDE_MODEL_SIMPLE, complex: cfg.CLAUDE_MODEL_COMPLEX, hard: cfg.CLAUDE_MODEL_HARD },
     tz: cfg.AGENT_TZ,
     localTimeoutMs: cfg.OLLAMA_TIMEOUT_MS,
   });
-  const toolCtx = { cfg, run: execRunner, dryRun: cfg.AGENT_DRY_RUN, claude };
+  const coder = new CoderSessions({ db, cfg, run: execRunner, msg: tg, approveScript: approveOpts.approveScript });
+  const toolCtx = {
+    cfg,
+    run: execRunner,
+    dryRun: cfg.AGENT_DRY_RUN,
+    claude,
+    coder,
+    rememberDeploy: (id: number) => setKv(db, KV_PENDING_DEPLOY, JSON.stringify({ chatId: id, at: Date.now() })),
+  };
   const confirm = new ConfirmFlow(db, tg, toolCtx);
-  const approvals = cfg.AGENT_CONNECTORS ? new ApprovalBroker(db, tg) : undefined;
-  if (approvals) {
-    approvalEndpoint = await startApprovalServer(path.join(cfg.AGENT_DATA_DIR, "approve.sock"), approvals).catch((err) => {
-      log.warn("approve", `Freigabe-Socket nicht gestartet – Connectors aus: ${(err as Error).message}`);
+  // Root-Befehle aus Claude-Läufen (root_command): erst nach Klick, dann über den Helfer außerhalb der Sandbox
+  const runRoot: RootRunner | undefined = cfg.AGENT_ROOT_EXEC
+    ? async (grant, command) => {
+        if (cfg.AGENT_DRY_RUN) return { code: 0, output: "Dry-Run – nicht ausgeführt" };
+        const cmd = helperCommand(cfg.AGENT_HELPER, "root-exec", [grant]);
+        const res = await execRunner(cmd.file, cmd.args, { input: command, timeoutMs: 31 * 60_000 });
+        return { code: res.code, output: (res.stdout || res.stderr).slice(-20_000) };
+      }
+    : undefined;
+  const approvals = new ApprovalBroker(db, tg);
+  let coderEndpoint: ApprovalEndpoint | null = null;
+  if (cfg.AGENT_CONNECTORS || cfg.AGENT_TASK_SHELL) {
+    approvalEndpoint = await startApprovalServer(path.join(cfg.AGENT_DATA_DIR, "approve.sock"), approvals, { runRoot }).catch((err) => {
+      log.warn("approve", `Freigabe-Socket nicht gestartet – Connectors und Befehle in run_task aus: ${(err as Error).message}`);
       return null;
     });
   }
-  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, approvals, files: telegram ?? undefined });
-  if (approvalEndpoint) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
+  // Coding-Agents laufen als Luis: eigener Socket (für alle verbindbar), Zugang nur mit dem Token ihrer Sitzung
+  coderEndpoint = await startApprovalServer(cfg.AGENT_CODER_SOCKET, approvals, { auth: coder.tokenAuth, mode: 0o666, runRoot }).catch((err) => {
+    log.warn("coder", `Freigabe-Socket für Coding-Agents nicht gestartet (${cfg.AGENT_CODER_SOCKET}): ${(err as Error).message}`);
+    return null;
+  });
+  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined });
+  if (approvalEndpoint && cfg.AGENT_CONNECTORS) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
   const sampler = new MemSampler();
 
   // ── Startprüfungen ──────────────────────────────────────────────
   state.ollama = await local.check(cfg.OLLAMA_MODEL);
+  state.free = await free.check();
   const auth = await claude.checkAuth();
   state.claude = auth.loggedIn;
-  log.info("main", `Start${cfg.AGENT_DRY_RUN ? " (Dry-Run)" : ""}: Ollama ${state.ollama ? "ok" : "nicht verfügbar"}, Claude ${auth.loggedIn ? `eingeloggt (${auth.detail})` : "nicht eingeloggt"}`);
+  log.info("main", `Start${cfg.AGENT_DRY_RUN ? " (Dry-Run)" : ""}: Ollama ${state.ollama ? "ok" : "nicht verfügbar"}, Claude ${auth.loggedIn ? `eingeloggt (${auth.detail})` : "nicht eingeloggt"}${cfg.ENABLE_FREE_PROVIDER ? `, FreeLLM ${state.free ? "ok" : "nicht erreichbar"}` : ""}`);
   seedDefaultJobs(db, cfg, cfg.AGENT_TZ);
   await telegram?.setCommands(COMMANDS).catch((err) => log.warn("telegram", `setMyCommands: ${(err as Error).message}`));
   const warnings = [
@@ -109,12 +156,15 @@ async function main(): Promise<void> {
       : null,
     cfg.AGENT_CONNECTORS && !approvalEndpoint ? "⚠️ Connectors aktiviert, aber der Freigabe-Socket läuft nicht – Connectors aus." : null,
     !state.ollama ? `⚠️ Ollama bzw. Modell <code>${escapeHtml(cfg.OLLAMA_MODEL)}</code> nicht verfügbar – Klassifikation fällt auf „complex“ zurück.` : null,
+    cfg.ENABLE_FREE_PROVIDER && !state.free ? `⚠️ FreeLLM (<code>${escapeHtml(cfg.FREE_LLM_URL)}</code>) nicht erreichbar – kein Ersatz bei leerem Kontingent.` : null,
     cfg.AGENT_DRY_RUN ? "🧪 Dry-Run: ändernde Aktionen werden nur simuliert." : null,
   ].filter(Boolean);
   // nur an Telegram – im Web-Chat würde jeder Neustart die jüngste Unterhaltung zumüllen
   await telegram
     ?.send(chatId, `🟢 LifeOS-Agent gestartet${warnings.length ? `\n${warnings.join("\n")}` : ""}`)
     .catch((err) => log.error("telegram", (err as Error).message));
+
+  await reportDeploy(db, tg, state);
 
   // ── Jobs ────────────────────────────────────────────────────────
   const scheduler = new Scheduler(db, cfg.AGENT_TZ, {
@@ -151,8 +201,12 @@ async function main(): Promise<void> {
     if (ticks % 2 === 1) sampler.sample(); // jede Minute
     await scheduler.tick().catch((err) => log.error("scheduler", (err as Error).message));
     await confirm.sweep().catch((err) => log.error("confirm", (err as Error).message));
+    await coder.poll().catch((err) => log.error("coder", (err as Error).message));
     await gateway.drainQueue().catch((err) => log.error("queue", (err as Error).message));
-    if (ticks % 10 === 0) state.ollama = await local.check(cfg.OLLAMA_MODEL); // alle 5 Min
+    if (ticks % 10 === 0) {
+      state.ollama = await local.check(cfg.OLLAMA_MODEL); // alle 5 Min
+      state.free = await free.check();
+    }
     if (!state.claude && ticks % 60 === 0) {
       state.claude = (await claude.checkAuth()).loggedIn;
       if (state.claude) await telegram?.send(chatId, "🟢 Claude-CLI jetzt eingeloggt.").catch(() => undefined);
@@ -190,6 +244,7 @@ async function main(): Promise<void> {
     server?.close();
     webServer?.close();
     approvalEndpoint?.server.close();
+    coderEndpoint?.server.close();
     setTimeout(() => {
       db.close();
       process.exit(0);
@@ -199,6 +254,25 @@ async function main(): Promise<void> {
   process.on("SIGINT", stop);
 
   if (telegram) await pollLoop(telegram, gateway, db, state);
+}
+
+/** Agent wurde vom Deploy neu gestartet → Ergebnis in den Chat, aus dem der Deploy kam. */
+async function reportDeploy(db: AgentDB, tg: ChannelMessenger, state: State): Promise<void> {
+  const raw = getKv(db, KV_PENDING_DEPLOY);
+  if (!raw) return;
+  setKv(db, KV_PENDING_DEPLOY, "");
+  try {
+    const { chatId, at } = JSON.parse(raw) as { chatId: number; at: number };
+    // älter als 1 h: der Neustart kam nicht vom Deploy
+    if (!Number.isFinite(chatId) || Date.now() - at > 3_600_000) return;
+    const mins = Math.max(1, Math.round((Date.now() - at) / 60_000));
+    await tg.send(
+      chatId,
+      `✅ Deploy abgeschlossen – Agent läuft wieder (nach ca. ${mins} Min).\nClaude ${state.claude ? "ok" : "nicht eingeloggt"} · Ollama ${state.ollama ? "ok" : "aus"}`,
+    );
+  } catch (err) {
+    log.warn("deploy", `Deploy-Rückmeldung: ${(err as Error).message}`);
+  }
 }
 
 async function pollLoop(tg: TelegramApi, gateway: Gateway, db: AgentDB, state: State): Promise<void> {
@@ -242,7 +316,7 @@ function startHealthServer(cfg: AgentConfig, state: State, db: AgentDB) {
     }
     const ok = polling && dbOk;
     res.writeHead(ok ? 200 : 503, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok, polling, db: dbOk, telegram: state.telegram, web: state.web, ollama: state.ollama, claude: state.claude, uptimeSec: Math.round((Date.now() - state.startedAt) / 1000) }));
+    res.end(JSON.stringify({ ok, polling, db: dbOk, telegram: state.telegram, web: state.web, ollama: state.ollama, claude: state.claude, free: state.free, uptimeSec: Math.round((Date.now() - state.startedAt) / 1000) }));
   });
   server.on("error", (err) => log.warn("health", err.message));
   server.listen(cfg.AGENT_HEALTH_PORT, cfg.AGENT_HEALTH_HOST);

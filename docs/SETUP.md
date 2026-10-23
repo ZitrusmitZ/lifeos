@@ -133,13 +133,27 @@ Voraussetzung: Pi-hole und Nextcloud laufen per Docker Compose auf demselben Ser
 
 Unter **Dateien** (Ordner-Symbol in der Kopfleiste, Nextcloud-Widget, *Einstellungen*) lässt sich die Nextcloud durchsuchen, per Drag & Drop befüllen (auch ganze Ordner und Dateien mit mehreren GB – in 8-MB-Stücken, fortsetzbar) und ordnen. Löschen verschiebt in den Nextcloud-Papierkorb.
 
-**Teilen:** LifeOS erzeugt eigene Links `/d/<token>` mit Ablauf (1/7/30 Tage oder nie), optionalem Passwort und Download-Zähler. Damit auch Leute ohne Tailscale sie öffnen können, wird **nur dieser Pfad** per Tailscale Funnel öffentlich:
+**Teilen:** LifeOS erzeugt eigene Links `/d/<token>` mit Ablauf (1/7/30 Tage oder nie), optionalem Passwort und Download-Zähler. Damit auch Leute ohne Tailscale sie öffnen können, läuft neben LifeOS der kleine Container **`lifeos-share`** (Profil `share` in `compose.yaml`). Er meldet sich als eigenes Gerät im Tailnet an und gibt per Funnel **nur `/d/`** weiter.
 
-```bash
-sudo tailscale funnel --bg --https=10000 --set-path=/d http://127.0.0.1:3000/d
-```
+> **Nie Funnel auf dem Server-Namen selbst.** Funnel trägt den Namen ins öffentliche DNS ein (und Tailscale entfernt den Eintrag danach nur verzögert). Browser mit eigenem DNS – iCloud Privat-Relay, Brave „Sicheres DNS“ – landen dann beim Funnel-Relay statt im Tailnet: Das Dashboard zeigt `ERR_SSL_PROTOCOL_ERROR` bzw. die Home-Bildschirm-App bleibt weiß. Deshalb der eigene Name `lifeos-share`.
 
-Dann in `/opt/lifeos/.env` `SHARE_PUBLIC_URL=https://<host>.<tailnet>.ts.net:10000` setzen und den Container neu starten. Funnel muss im Tailscale-Admin für den Server erlaubt sein (*Access controls → Funnel*, `nodeAttrs` mit `funnel`). Prüfen: `tailscale funnel status` darf nur `/d` zeigen. Ohne Funnel funktionieren die Links nur im Tailnet.
+1. **Access controls** (https://login.tailscale.com/admin/acls): Tag anlegen und Funnel **nur** für diesen Tag erlauben:
+   ```json
+   "tagOwners": { "tag:share": ["autogroup:admin"] },
+   "nodeAttrs": [ { "target": ["tag:share"], "attr": ["funnel"] } ]
+   ```
+2. **Auth-Key** (https://login.tailscale.com/admin/settings/keys → *Generate auth key*): *Reusable* aus, *Ephemeral* aus, *Pre-approved* an (falls Geräte-Freigabe aktiv), *Tags* → `tag:share`. Ablauf egal (wird nur für die erste Anmeldung gebraucht; danach liegt der Schlüssel des Geräts im Volume `share-state`).
+3. In `/opt/lifeos/.env`:
+   ```
+   COMPOSE_PROFILES=share
+   SHARE_TS_AUTHKEY=tskey-auth-…
+   SHARE_PUBLIC_URL=https://lifeos-share.<tailnet>.ts.net
+   ```
+4. `cd /opt/lifeos && sudo docker compose up -d --no-build` – startet `lifeos-share` und LifeOS mit der neuen Link-Adresse.
+5. Nach der ersten Anmeldung `SHARE_TS_AUTHKEY` wieder leeren (die `.env` landet auch im LifeOS-Container; der Key wird nicht mehr gebraucht).
+6. Prüfen: `sudo docker logs lifeos-share` zeigt die Anmeldung; `https://lifeos-share.<tailnet>.ts.net/d/<irgendwas>` liefert die LifeOS-Seite „Link nicht gültig“, `https://lifeos-share.<tailnet>.ts.net/` nur 404.
+
+Ohne Schritt 1–4 funktionieren die Links nur im Tailnet.
 
 Was öffentlich ist: die Download-Seite (ohne JavaScript, kein Zugriff auf `/_next`), der Download selbst und bei Bildern ein Vorschaubild. Dashboard, `/api/files` und Nextcloud bleiben hinter der Tailnet-Anmeldung. Unbekannte, abgelaufene und widerrufene Links antworten gleich (404); Seitenaufrufe und Passwortversuche sind pro IP begrenzt.
 

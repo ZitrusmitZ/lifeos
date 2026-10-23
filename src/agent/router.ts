@@ -82,6 +82,8 @@ export type RouterDeps = {
   local: Provider;
   claude: Provider;
   api: Provider;
+  /** FreeLLM (FreeLLMAPI) – optional */
+  free?: Provider;
   localModel: string;
   models: { simple: string; complex: string; hard: string };
   tz: string;
@@ -206,7 +208,7 @@ export class Router {
       if (blockedUntil || !this.d.claude.available()) {
         const why = blockedUntil ? `Pro-Kontingent leer bis ${formatTime(new Date(blockedUntil), this.d.tz)}` : "Claude nicht eingeloggt";
         reasons.push(why);
-        return finish(await this.fallback(chatId, text, prompt, TIERS[tier], model, why, blockedUntil, decide));
+        return finish(await this.fallback(chatId, text, prompt, TIERS[tier], model, why, blockedUntil, decide, opts.connectors));
       }
       try {
         const res = await this.d.claude.complete({
@@ -223,7 +225,7 @@ export class Router {
           const until = markQuotaExhausted(this.d.db, err.resetAt, this.now());
           const why = `Pro-Kontingent leer, Reset ca. ${formatTime(new Date(until), this.d.tz)}`;
           reasons.push(why);
-          return finish(await this.fallback(chatId, text, prompt, TIERS[tier], model, why, until, decide));
+          return finish(await this.fallback(chatId, text, prompt, TIERS[tier], model, why, until, decide, opts.connectors));
         }
         reasons.push(`Claude-Fehler: ${(err as Error).message}`);
         return finish({ text: `⚠️ ${(err as Error).message}`, decision: decide("claude", model, false) });
@@ -233,7 +235,8 @@ export class Router {
   }
 
   /**
-   * Claude gerade nicht nutzbar: API (nur wenn aktiviert), sonst simple → lokal mit Hinweis,
+   * Claude gerade nicht nutzbar: API (nur wenn aktiviert), dann FreeLLM (nicht für Connector-Anfragen – ohne Zugriff auf
+   * Mails/Kalender würde es nur raten), sonst simple → lokal mit Hinweis,
    * complex/hard → Queue (bei leerem Kontingent) bzw. lokal mit Hinweis (nicht eingeloggt).
    */
   private async fallback(
@@ -245,6 +248,7 @@ export class Router {
     why: string,
     blockedUntil: number | null,
     decide: (p: ProviderName, m: string, ok: boolean) => Decision,
+    connectors = false,
   ): Promise<Answer> {
     if (this.d.api.available()) {
       try {
@@ -252,6 +256,14 @@ export class Router {
         return { text: res.text, decision: decide("api", res.model, true), notice: `ℹ️ ${why} – über API beantwortet` };
       } catch (err) {
         log.warn("router", `API-Fallback: ${(err as Error).message}`);
+      }
+    }
+    if (!connectors && this.d.free?.available()) {
+      try {
+        const res = await this.d.free.complete({ prompt, system: ANSWER_SYSTEM, model: "free" });
+        return { text: res.text, decision: decide("free", res.model, true), notice: `ℹ️ ${why} – über FreeLLM (${res.model}) beantwortet` };
+      } catch (err) {
+        log.warn("router", `FreeLLM-Fallback: ${(err as Error).message}`);
       }
     }
     if (blockedUntil && tier !== "simple") {

@@ -5,7 +5,7 @@ import { currentDay, loadExams, loadSettings, loadUntis, loadWeather } from "@/i
 import { changesTile, examTile, greetingEmoji, lessonTile, weatherTile, type HeroTile } from "@/lib/hero";
 import { formatDayLong, formatTime, greeting } from "@/lib/time";
 import { cn } from "@/lib/utils";
-import { SettingsLink } from "../nav";
+import { FilesLink, SettingsLink } from "../nav";
 import { PageHeader } from "../page-header";
 import { QuickAddButton } from "../quick-add";
 
@@ -65,6 +65,7 @@ export async function TodayHero() {
       <PageHeader eyebrow={formatDayLong(day)} title={`${hello} ${greetingEmoji(hello)}`} trailing={
           <div className="flex items-center">
             <QuickAddButton />
+            <FilesLink className="desktop:hidden" />
             <SettingsLink className="desktop:hidden" />
           </div>
         }
