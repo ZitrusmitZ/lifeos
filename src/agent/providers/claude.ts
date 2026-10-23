@@ -56,19 +56,28 @@ export type ClaudeRunOptions = {
   /** eingebaute Tools, die verfügbar, aber NICHT ohne Rückfrage erlaubt sind */
   askTools?: string[];
   disallowedTools?: string[];
+  /** MCP-Tools, die ohne Rückfrage laufen (z. B. die LifeOS-Tools – die fragen selbst mit eigener Vorschau) */
+  allowMcp?: string[];
+  /** Sitzung speichern (für `resume`); Standard: nicht speichern */
+  persist?: boolean;
+  /** frühere Sitzung fortsetzen (Session-ID aus dem Stream) */
+  resume?: string;
 };
 
 export function claudeArgs(o: ClaudeRunOptions): string[] {
   const tools = o.tools ?? [];
   const ask = o.approval ? (o.askTools ?? []) : [];
-  const args = ["-p", "--output-format", "stream-json", "--verbose", "--model", o.model, "--no-session-persistence"];
+  const args = ["-p", "--output-format", "stream-json", "--verbose", "--model", o.model];
+  if (!o.persist) args.push("--no-session-persistence");
+  if (o.resume) args.push("--resume", o.resume);
   if (o.connectors) args.push("--mcp-config", o.connectors.mcpConfigFile, "--permission-prompt-tool", o.connectors.promptTool);
   else {
     args.push("--strict-mcp-config");
     if (o.approval) args.push("--mcp-config", o.approval.mcpConfigFile, "--permission-prompt-tool", o.approval.promptTool);
   }
   args.push("--tools", [...tools, ...ask].join(","));
-  if (tools.length) args.push("--allowedTools", ...tools);
+  const allowed = [...tools, ...(o.allowMcp ?? [])];
+  if (allowed.length) args.push("--allowedTools", ...allowed);
   if (o.disallowedTools?.length) args.push("--disallowedTools", ...o.disallowedTools);
   for (const dir of o.addDirs ?? []) args.push("--add-dir", dir);
   if (o.permissionMode) args.push("--permission-mode", o.permissionMode);
@@ -109,6 +118,7 @@ export type StreamOutcome = {
   isError: boolean;
   costUsd?: number;
   rateLimit: RateLimitInfo | null;
+  sessionId?: string;
 };
 
 /** Wertet die stream-json-Zeilen aus: Text der Antwort, Fehlerstatus, Kosten, Rate-Limit-Ereignisse. */
@@ -118,6 +128,7 @@ export function parseClaudeStream(lines: string[]): StreamOutcome {
   let isError = false;
   let costUsd: number | undefined;
   let rateLimit: RateLimitInfo | null = null;
+  let sessionId: string | undefined;
   for (const line of lines) {
     let ev: Record<string, unknown>;
     try {
@@ -125,6 +136,7 @@ export function parseClaudeStream(lines: string[]): StreamOutcome {
     } catch {
       continue;
     }
+    if (typeof ev.session_id === "string") sessionId = ev.session_id;
     if (ev.type === "assistant") {
       const content = (ev.message as { content?: { type: string; text?: string }[] } | undefined)?.content ?? [];
       for (const c of content) if (c.type === "text" && c.text) texts.push(c.text);
@@ -141,13 +153,13 @@ export function parseClaudeStream(lines: string[]): StreamOutcome {
       };
     }
   }
-  return { text: (result ?? texts.join("\n")).trim(), isError, costUsd, rateLimit };
+  return { text: (result ?? texts.join("\n")).trim(), isError, costUsd, rateLimit, sessionId };
 }
 
 export type ClaudeSpawn = (
   bin: string,
   args: string[],
-  opts: { cwd?: string; env: NodeJS.ProcessEnv; stdin: string; timeoutMs: number; onLine: (line: string) => void },
+  opts: { cwd?: string; env: NodeJS.ProcessEnv; stdin: string; timeoutMs: number; onLine: (line: string) => void; signal?: AbortSignal },
 ) => Promise<{ code: number | null; stderr: string }>;
 
 /** Startet die CLI ohne Shell; der Prompt geht über stdin (nicht in `ps` sichtbar, keine Längengrenze). */
@@ -156,6 +168,7 @@ export const spawnClaude: ClaudeSpawn = (bin, args, opts) =>
     const child = spawn(bin, args, { cwd: opts.cwd, env: opts.env, stdio: ["pipe", "pipe", "pipe"], shell: false });
     let stderr = "";
     const timer = setTimeout(() => child.kill("SIGTERM"), opts.timeoutMs);
+    opts.signal?.addEventListener("abort", () => child.kill("SIGTERM"), { once: true });
     createInterface({ input: child.stdout }).on("line", opts.onLine);
     child.stderr.on("data", (d: Buffer) => {
       stderr = (stderr + d.toString()).slice(-4000);
@@ -206,16 +219,16 @@ export function writeApproveConfig(
   c: ConnectorOptions,
   endpoint: { socketPath: string; token: string },
   chatId: number,
-  opts: { root?: boolean; file?: string } = {},
+  opts: { root?: boolean; tools?: boolean; file?: string } = {},
 ): string {
   mkdirSync(c.tmpDir, { recursive: true, mode: 0o700 });
   const file = opts.file ?? path.join(c.tmpDir, `approve-${randomBytes(6).toString("hex")}.json`);
-  writeFileSync(file, JSON.stringify(approveConfig(c.approveScript, endpoint, chatId, opts.root)), { mode: 0o600 });
+  writeFileSync(file, JSON.stringify(approveConfig(c.approveScript, endpoint, chatId, opts.root, opts.tools)), { mode: 0o600 });
   return file;
 }
 
 /** MCP-Konfiguration (`--mcp-config`) des Freigabe-Servers; `root` schaltet das Tool root_command frei. */
-export function approveConfig(approveScript: string, endpoint: { socketPath: string; token: string }, chatId: number, root = false) {
+export function approveConfig(approveScript: string, endpoint: { socketPath: string; token: string }, chatId: number, root = false, tools = false) {
   return {
     mcpServers: {
       [APPROVE_SERVER]: {
@@ -227,11 +240,14 @@ export function approveConfig(approveScript: string, endpoint: { socketPath: str
           LIFEOS_APPROVE_TOKEN: endpoint.token,
           LIFEOS_APPROVE_CHAT: String(chatId),
           ...(root ? { LIFEOS_APPROVE_ROOT: "1" } : {}),
+          ...(tools ? { LIFEOS_APPROVE_TOOLS: "1" } : {}),
         },
       },
     },
   };
 }
+
+export type RunExtra = { cwd?: string; timeoutMs?: number; onProgress?: () => void; onLine?: (line: string) => void; signal?: AbortSignal };
 
 export class ClaudeProvider implements Provider {
   readonly name = "claude" as const;
@@ -304,15 +320,19 @@ export class ClaudeProvider implements Provider {
     prompt: string,
     opts: ClaudeRunOptions,
     chatId: number | undefined,
-    extra: { cwd?: string; timeoutMs?: number; onProgress?: () => void; root?: boolean } = {},
+    extra: RunExtra & { root?: boolean; lifeosTools?: boolean; connectors?: boolean } = {},
   ): Promise<CompletionResult> {
     const a = this.o.taskApproval;
     const endpoint = a && chatId !== undefined ? a.endpoint() : null;
-    if (!a || !endpoint || chatId === undefined) return this.run(prompt, { ...opts, askTools: undefined, approval: undefined }, extra);
-    // root: zusätzlich das Tool root_command (jeder Aufruf nur nach Klick, einmalige Freigabe pro Befehl)
-    const file = writeApproveConfig(a, endpoint, chatId, { root: extra.root });
+    if (!a || !endpoint || chatId === undefined) return this.run(prompt, { ...opts, askTools: undefined, approval: undefined, allowMcp: undefined }, extra);
+    // root: zusätzlich das Tool root_command (jeder Aufruf nur nach Klick, einmalige Freigabe pro Befehl);
+    // lifeosTools: die Agent-Tools (Deploy, Docker, Coding-Agents …) als MCP-Tools
+    const file = writeApproveConfig(a, endpoint, chatId, { root: extra.root, tools: extra.lifeosTools });
+    // connectors: zusätzlich die claude.ai-Connectors (gleicher Freigabe-Server, kein --strict-mcp-config)
+    const mcp = { mcpConfigFile: file, promptTool: APPROVE_PROMPT_TOOL };
+    const withMcp = extra.connectors && this.connectorsReady() ? { connectors: mcp } : { approval: mcp };
     try {
-      return await this.run(prompt, { ...opts, approval: { mcpConfigFile: file, promptTool: APPROVE_PROMPT_TOOL } }, {
+      return await this.run(prompt, { ...opts, ...withMcp }, {
         ...extra,
         timeoutMs: Math.max(extra.timeoutMs ?? 0, a.timeoutMs),
       });
@@ -322,22 +342,21 @@ export class ClaudeProvider implements Provider {
   }
 
   /** Allgemeiner Aufruf (auch für `run_task` mit eingeschränkten Tools in festem Arbeitsverzeichnis). */
-  async run(
-    prompt: string,
-    opts: ClaudeRunOptions,
-    extra: { cwd?: string; timeoutMs?: number; onProgress?: () => void } = {},
-  ): Promise<CompletionResult> {
+  async run(prompt: string, opts: ClaudeRunOptions, extra: RunExtra = {}): Promise<CompletionResult> {
     const started = Date.now();
     const lines: string[] = [];
     const { code, stderr } = await (this.o.spawnFn ?? spawnClaude)(this.o.bin, claudeArgs(opts), {
       cwd: extra.cwd,
-      // MCP_TOOL_TIMEOUT: Connector-Aufrufe dürfen auf Luis' Freigabe warten (max. 5 Min)
-      env: { ...claudeEnv(process.env, { storedLogin: Boolean(this.o.connectors) }), ...(opts.connectors || opts.approval ? { MCP_TOOL_TIMEOUT: "360000" } : {}) },
+      // MCP_TOOL_TIMEOUT: Aufrufe dürfen auf Luis' Freigabe warten (max. 5 Min) – root_command und LifeOS-Tools
+      // (Deploy, Backup) laufen danach selbst bis zu 30 Min
+      env: { ...claudeEnv(process.env, { storedLogin: Boolean(this.o.connectors) }), ...(opts.connectors || opts.approval ? { MCP_TOOL_TIMEOUT: "2400000" } : {}) },
       stdin: prompt,
       timeoutMs: extra.timeoutMs ?? this.o.timeoutMs,
+      signal: extra.signal,
       onLine: (line) => {
         lines.push(line);
         extra.onProgress?.();
+        extra.onLine?.(line);
       },
     });
     const out = parseClaudeStream(lines);
@@ -353,6 +372,6 @@ export class ClaudeProvider implements Provider {
       if (/not logged in|please run .*login|invalid api key|oauth token/i.test(message)) this.loggedIn = false;
       throw new ProviderError(`claude: ${message.slice(0, 300)}`);
     }
-    return { text: out.text, model: opts.model, durationMs: Date.now() - started, costUsd: out.costUsd };
+    return { text: out.text, model: opts.model, durationMs: Date.now() - started, costUsd: out.costUsd, sessionId: out.sessionId };
   }
 }

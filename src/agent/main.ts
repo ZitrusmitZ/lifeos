@@ -16,6 +16,8 @@ import { Router } from "./router.ts";
 import { seedDefaultJobs, Scheduler, type Job } from "./scheduler/scheduler.ts";
 import { TelegramApi } from "./telegram/api.ts";
 import { escapeHtml, markdownToHtml } from "./telegram/format.ts";
+import { AgentMode } from "./agent-mode.ts";
+import { ToolGate } from "./mcp/tool-gate.ts";
 import { ApprovalBroker, startApprovalServer, type ApprovalEndpoint, type RootRunner } from "./mcp/approvals.ts";
 import { CoderSessions } from "./coder/sessions.ts";
 import { execRunner, helperCommand } from "./tools/exec.ts";
@@ -126,7 +128,7 @@ async function main(): Promise<void> {
   const approvals = new ApprovalBroker(db, tg);
   let coderEndpoint: ApprovalEndpoint | null = null;
   if (cfg.AGENT_CONNECTORS || cfg.AGENT_TASK_SHELL) {
-    approvalEndpoint = await startApprovalServer(path.join(cfg.AGENT_DATA_DIR, "approve.sock"), approvals, { runRoot }).catch((err) => {
+    approvalEndpoint = await startApprovalServer(path.join(cfg.AGENT_DATA_DIR, "approve.sock"), approvals, { runRoot, tools: new ToolGate(db, toolCtx, approvals) }).catch((err) => {
       log.warn("approve", `Freigabe-Socket nicht gestartet – Connectors und Befehle in run_task aus: ${(err as Error).message}`);
       return null;
     });
@@ -136,7 +138,8 @@ async function main(): Promise<void> {
     log.warn("coder", `Freigabe-Socket für Coding-Agents nicht gestartet (${cfg.AGENT_CODER_SOCKET}): ${(err as Error).message}`);
     return null;
   });
-  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined });
+  const agent = new AgentMode({ db, cfg, claude, msg: tg });
+  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined, agent });
   if (approvalEndpoint && cfg.AGENT_CONNECTORS) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
   const sampler = new MemSampler();
 

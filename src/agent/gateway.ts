@@ -1,3 +1,4 @@
+import type { AgentMode } from "./agent-mode.ts";
 import type { AgentConfig } from "./config.ts";
 import { serviceMap } from "./config.ts";
 import { audit, claimPending, createPending, type ConfirmFlow } from "./confirm.ts";
@@ -5,9 +6,9 @@ import type { AgentDB } from "./db.ts";
 import { log } from "./log.ts";
 import type { ApprovalBroker } from "./mcp/approvals.ts";
 import type { ClaudeProvider } from "./providers/claude.ts";
-import { QuotaError, type Provider } from "./providers/types.ts";
+import { ProviderError, QuotaError, type Provider } from "./providers/types.ts";
 import { bumpAttempt, clearQuota, finishQueued, lastRateLimit, markQuotaExhausted, quotaBlockedUntil, queuedTasks } from "./quota.ts";
-import { lastDecision, msgHash, type Router } from "./router.ts";
+import { lastDecision, logDecision, msgHash, type Answer, type Classification, type Router } from "./router.ts";
 import { describeCron, isValidCron, nextRun } from "./scheduler/cron.ts";
 import { parseExplicitJob, parseScheduleRules, parseScheduleWithLlm, type ParsedSchedule } from "./scheduler/parse.ts";
 import { createJob, deleteJob, getJob, listJobs, updateJob } from "./scheduler/scheduler.ts";
@@ -36,9 +37,11 @@ export const HELP = `<b>LifeOS-Agent</b>
 /job_del &lt;id&gt; – Job löschen
 /model – zuletzt genutztes Modell + Grund
 /quota – Claude-Kontingent und Warteschlange
+/neu – neue Agent-Sitzung (vergisst den bisherigen Verlauf)
+/stop – laufende Agent-Aufgabe abbrechen
 /help – diese Hilfe
 
-Freitext: „Status“, „Termine morgen“, „Was hab ich heute vor?“, „Starte Minecraft neu“, „Logs von ollama 50“, „Backup minecraft“, „Aufgabe: …“, „Erinner mich …“ oder einfach fragen.`;
+Freitext: „Status“, „Termine morgen“, „Starte Minecraft neu“, „Logs von ollama 50“, „Erinner mich …“ – oder einfach eine Aufgabe: „Richte X ein“, „Warum ist Y langsam?“, „Überarbeite die Agent-Seite …“. Der Agent sieht nach, plant und erledigt es; Befehle, root und Änderungen nur nach deinem Klick.`;
 
 export const COMMANDS = [
   { command: "status", description: "Serverwerte" },
@@ -49,6 +52,8 @@ export const COMMANDS = [
   { command: "job_del", description: "Job löschen" },
   { command: "model", description: "Zuletzt genutztes Modell" },
   { command: "quota", description: "Claude-Kontingent" },
+  { command: "neu", description: "Neue Agent-Sitzung" },
+  { command: "stop", description: "Agent-Aufgabe abbrechen" },
   { command: "help", description: "Hilfe" },
 ];
 
@@ -88,6 +93,8 @@ export type GatewayDeps = {
   free?: Provider;
   /** Freigaben für Connector-Aktionen und Befehle aus `run_task` */
   approvals?: ApprovalBroker;
+  /** Agent-Modus: Nachrichten als Claude-Sitzung mit Werkzeugen */
+  agent?: AgentMode;
   now?: () => number;
   /** für Tests (Kalender über LifeOS) */
   fetch?: typeof fetch;
@@ -315,8 +322,12 @@ export class Gateway {
     // Stufe 2: lokale Klassifikation
     const stopTyping = this.keepTyping(chatId);
     try {
+      const agent = this.d.agent?.enabled() && !quotaBlockedUntil(this.d.db, this.now()) ? this.d.agent : null;
+      // laufende Agent-Sitzung: alles dorthin (auch „ja, mach das“)
+      if (agent?.active(chatId)) return await this.agentAnswer(agent, chatId, text, null, "laufende Agent-Sitzung");
       const { c, reason } = await this.d.router.classify(text);
       if (c.category === "schedule") return await this.proposeJob(chatId, text);
+      if (agent && c.complexity !== "trivial") return await this.agentAnswer(agent, chatId, text, c, reason);
       if (c.category === "server" && c.needs_tools) {
         const picked = await pickToolWithLlm(this.d.local, this.d.cfg.OLLAMA_MODEL, text, [...serviceMap(this.d.cfg).keys()]);
         if (picked) {
@@ -335,10 +346,52 @@ export class Gateway {
             : undefined;
       const cls = connectors && c.complexity === "trivial" ? { ...c, complexity: "simple" as const } : c;
       const answer = await this.d.router.answer(chatId, text, cls, connectors ? `${reason}; Connectors` : reason, { context, connectors });
-      const body = answer.decision.provider === "local" || answer.queuedId ? escapeHtml(answer.text) : markdownToHtml(answer.text);
-      await this.d.tg.send(chatId, answer.notice ? `${body}\n\n<i>${escapeHtml(answer.notice)}</i>` : body);
+      await this.sendAnswer(chatId, answer);
     } finally {
       stopTyping();
+    }
+  }
+
+  private async sendAnswer(chatId: number, answer: Answer): Promise<void> {
+    const body = answer.decision.provider === "local" || answer.queuedId ? escapeHtml(answer.text) : markdownToHtml(answer.text);
+    await this.d.tg.send(chatId, answer.notice ? `${body}\n\n<i>${escapeHtml(answer.notice)}</i>` : body);
+  }
+
+  /** Agent-Modus; bei leerem Kontingent weiter wie bisher (API/FreeLLM/Queue, ohne Werkzeuge). */
+  private async agentAnswer(agent: AgentMode, chatId: number, text: string, c: Classification | null, reason: string): Promise<void> {
+    const cfg = this.d.cfg;
+    const model = c?.complexity === "hard" ? cfg.CLAUDE_MODEL_HARD : cfg.CLAUDE_MODEL_COMPLEX;
+    const started = this.now();
+    const decision = (ok: boolean, why: string) => ({
+      provider: "claude" as const,
+      model,
+      complexity: c?.complexity ?? null,
+      category: c?.category ?? null,
+      reason: `${reason}; Agent-Modus${why}`,
+      durationMs: this.now() - started,
+      ok,
+    });
+    try {
+      const res = await agent.answer(chatId, text, model);
+      logDecision(this.d.db, text, decision(true, ""), this.now());
+      log.info("router", `${msgHash(text)} → Agent ${model} (${reason}) ${this.now() - started} ms`);
+      await this.d.tg.send(chatId, markdownToHtml(res.text));
+    } catch (err) {
+      if (err instanceof QuotaError) {
+        markQuotaExhausted(this.d.db, err.resetAt, this.now());
+        logDecision(this.d.db, text, decision(false, "; Kontingent leer"), this.now());
+        const cls = c ?? { complexity: "complex" as const, needs_tools: false, category: "chat" as const };
+        const answer = await this.d.router.answer(chatId, text, cls, `${reason}; Agent: Kontingent leer`);
+        const notice = [answer.notice, "ohne Werkzeuge, bis das Pro-Kontingent zurück ist"].filter(Boolean).join(" · ");
+        await this.sendAnswer(chatId, { ...answer, notice });
+        return;
+      }
+      logDecision(this.d.db, text, decision(false, `; ${(err as Error).message.slice(0, 200)}`), this.now());
+      if (err instanceof ProviderError && /gestoppt/.test(err.message)) {
+        await this.d.tg.send(chatId, "✖️ Gestoppt.");
+        return;
+      }
+      throw err;
     }
   }
 
@@ -412,6 +465,15 @@ export class Gateway {
         return;
       case "quota":
         await this.d.tg.send(chatId, this.quotaText());
+        return;
+      case "neu":
+      case "new":
+        this.d.agent?.stop(chatId);
+        this.d.agent?.reset(chatId);
+        await this.d.tg.send(chatId, "🆕 Neue Sitzung – der bisherige Verlauf ist vergessen.");
+        return;
+      case "stop":
+        await this.d.tg.send(chatId, this.d.agent?.stop(chatId) ? "✖️ Wird abgebrochen…" : "Gerade läuft nichts.");
         return;
       default:
         await this.d.tg.send(chatId, `Unbekannter Befehl. /help`);

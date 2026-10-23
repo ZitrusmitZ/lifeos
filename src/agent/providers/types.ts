@@ -18,7 +18,7 @@ export type CompletionRequest = {
   connectorsChatId?: number;
 };
 
-export type CompletionResult = { text: string; model: string; durationMs: number; costUsd?: number };
+export type CompletionResult = { text: string; model: string; durationMs: number; costUsd?: number; sessionId?: string };
 
 export interface Provider {
   readonly name: ProviderName;

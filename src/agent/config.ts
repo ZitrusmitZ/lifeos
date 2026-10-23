@@ -118,6 +118,18 @@ const schema = z.object({
   /** Freigabe-Socket für Coding-Agents (läuft als anderer Nutzer; Zugriff nur mit Token pro Sitzung) */
   AGENT_CODER_SOCKET: str("/run/lifeos-agent/approve-coder.sock"),
 
+  // ── Agent-Modus: Chat-Nachrichten als Claude-Code-Sitzung mit Werkzeugen ──
+  /**
+   * Nicht-triviale Nachrichten laufen als Claude-Sitzung mit Dateien, Befehlen (Freigabe pro Befehl), root_command und
+   * allen LifeOS-Tools (Deploy, Docker, Coding-Agents …). Aus = reiner Chat wie früher.
+   */
+  AGENT_MODE: bool(true),
+  AGENT_MODE_MAX_TURNS: num(80),
+  /** Gesamtzeit einer Agent-Antwort inkl. Warten auf Klicks */
+  AGENT_MODE_TIMEOUT_MS: num(45 * 60_000),
+  /** Nach so vielen Minuten Pause beginnt der Chat eine neue Sitzung (sonst wird die alte fortgesetzt) */
+  AGENT_SESSION_IDLE_MIN: num(240),
+
   // ── Standard-Jobs ─────────────────────────────────────────────────
   AGENT_JOB_BRIEFING: bool(true),
   AGENT_JOB_HEALTH: bool(true),

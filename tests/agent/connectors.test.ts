@@ -221,7 +221,7 @@ describe("Claude-Aufruf mit Connectors", () => {
     expect(seen!.mode).toBe(0o600);
     expect(JSON.parse(seen!.config).mcpServers.lifeos_approve.env).toEqual({ LIFEOS_APPROVE_SOCKET: "/s.sock", LIFEOS_APPROVE_TOKEN: "geheim", LIFEOS_APPROVE_CHAT: "-4" });
     expect(seen!.args.join(" ")).not.toContain("geheim");
-    expect(seen!.env.MCP_TOOL_TIMEOUT).toBe("360000");
+    expect(seen!.env.MCP_TOOL_TIMEOUT).toBe("2400000");
     expect(seen!.args.slice(seen!.args.indexOf("--tools"), seen!.args.indexOf("--tools") + 2)).toEqual(["--tools", "Skill"]);
     const file = seen!.args[seen!.args.indexOf("--mcp-config") + 1];
     expect(existsSync(file)).toBe(false);
