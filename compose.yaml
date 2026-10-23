@@ -28,3 +28,40 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # Öffentliche Freigabe-Links aus „Dateien“ (/d/<token>) über Tailscale Funnel – unter einem EIGENEN Namen
+  # (lifeos-share.<tailnet>.ts.net). Funnel macht den Namen im öffentlichen DNS sichtbar; läge er auf dem Server-Namen,
+  # würden Browser mit eigenem DNS (iCloud Privat-Relay, Brave Secure DNS) das Dashboard nicht mehr erreichen.
+  # Nur mit `COMPOSE_PROFILES=share` und `SHARE_TS_AUTHKEY` in der .env aktiv, siehe docs/SETUP.md.
+  share:
+    image: tailscale/tailscale:v1.104.2
+    container_name: lifeos-share
+    profiles: ["share"]
+    restart: unless-stopped
+    hostname: lifeos-share
+    environment:
+      TS_AUTHKEY: ${SHARE_TS_AUTHKEY:-}
+      TS_HOSTNAME: lifeos-share
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      # Nur /d/ wird weitergereicht – alles andere beantwortet der Container selbst mit 404.
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - share-state:/var/lib/tailscale
+      - ./deploy/share/serve.json:/config/serve.json:ro
+    depends_on:
+      - lifeos
+    mem_limit: 128m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  share-state:

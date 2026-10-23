@@ -50,7 +50,7 @@ const schema = z.object({
   /** `occ user:auth-tokens:add <user>` – widerrufbar, nie das Login-Passwort */
   NEXTCLOUD_APP_PASSWORD: optional,
   NEXTCLOUD_PUBLIC_URL: optional,
-  /** Basis für Freigabe-Links `/d/<token>` – Tailscale Funnel, z. B. `https://homeserver.<tailnet>.ts.net:10000`. Ohne: APP_URL */
+  /** Basis für Freigabe-Links `/d/<token>` – Container lifeos-share (Funnel), z. B. `https://lifeos-share.<tailnet>.ts.net`. Ohne: APP_URL */
   SHARE_PUBLIC_URL: optional,
 
   // Mail-Sortierung (KI) und geplante Jobs
