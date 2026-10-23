@@ -94,6 +94,8 @@ const schema = z.object({
   FREE_LLM_KEY: optional,
   /** ein Modell oder eine Liste, der Reihe nach probiert (Kontingent leer, Fehler, leere Antwort → nächstes) */
   FREE_LLM_MODEL: str("gemini-flash,deepseek-v4-flash,llama-3.3-70b,auto"),
+  /** Spracherkennung für /api/stt ohne Groq-Key; `whisper-1` lässt FreeLLM ein Whisper wählen (mit Failover) */
+  FREE_LLM_STT_MODEL: str("whisper-1"),
   FREE_LLM_TIMEOUT_MS: num(120_000),
   /** pro Modell der Liste; danach das nächste */
   FREE_LLM_MODEL_TIMEOUT_MS: num(30_000),
