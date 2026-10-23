@@ -90,6 +90,7 @@ async function main(): Promise<void> {
     apiKey: cfg.FREE_LLM_KEY,
     model: cfg.FREE_LLM_MODEL,
     timeoutMs: cfg.FREE_LLM_TIMEOUT_MS,
+    modelTimeoutMs: cfg.FREE_LLM_MODEL_TIMEOUT_MS,
   });
   const router = new Router({
     db,
