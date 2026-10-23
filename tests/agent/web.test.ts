@@ -16,7 +16,7 @@ import type { Runner } from "@/agent/tools/exec";
 import { buildFeed, type FeedPending } from "@/agent/web/feed";
 import { ChannelMessenger, pushChatId, WEB_LATEST, WebMessenger, webChatId } from "@/agent/web/messenger";
 import { checkBearer, startWebServer, type WebServerDeps } from "@/agent/web/server";
-import { addMessage, createSession, deleteSession, getSession, latestSessionId, listMessages, listSessions } from "@/agent/web/store";
+import { addMessage, createSession, deleteSession, getSession, latestSessionId, exportMarkdown, listMessages, listSessions, updateSession } from "@/agent/web/store";
 import { agentDb, FakeMessenger, FakeProvider, LUIS, testConfig, TZ } from "./fakes";
 
 const NOW = Date.parse("2026-10-22T10:00:00+02:00");
@@ -316,6 +316,56 @@ describe("Socket-Server", () => {
       await close();
     }
   });
+  it("Session-Verwaltung: umbenennen, anheften, archivieren, wiederherstellen, exportieren", async () => {
+    const { sock, close } = await serve();
+    try {
+      const a = (await call(sock, "POST", "/sessions")).json.id as number;
+      const b = (await call(sock, "POST", "/sessions")).json.id as number;
+      const list = async (view = "") => ((await call(sock, "GET", `/sessions${view}`)).json.sessions as { id: number; pinned: boolean; archived: boolean; title: string | null }[]);
+
+      expect((await call(sock, "PATCH", `/sessions/${a}`, {})).status).toBe(400);
+      expect((await call(sock, "PATCH", `/sessions/${a}`, { pinned: "ja" })).status).toBe(400);
+      expect((await call(sock, "PATCH", "/sessions/999", { pinned: true })).status).toBe(404);
+      expect((await call(sock, "GET", "/sessions?view=alles")).status).toBe(400);
+
+      // Angeheftete stehen oben, auch wenn sie älter sind
+      await call(sock, "PATCH", `/sessions/${a}`, { pinned: true, title: "  Mein   Titel " });
+      expect((await list()).map((s) => [s.id, s.pinned, s.title])).toEqual([[a, true, "Mein Titel"], [b, false, null]]);
+      expect((await list("?view=pinned")).map((s) => s.id)).toEqual([a]);
+
+      // Archivieren löst die Anheftung, archivierte erscheinen nur im Archiv (durchsuchbar)
+      await call(sock, "PATCH", `/sessions/${a}`, { archived: true });
+      expect((await list()).map((s) => s.id)).toEqual([b]);
+      expect((await list("?view=archived&q=titel")).map((s) => [s.id, s.pinned])).toEqual([[a, false]]);
+      await call(sock, "PATCH", `/sessions/${a}`, { pinned: true });
+      expect((await list("?view=archived"))[0].pinned).toBe(false);
+
+      await call(sock, "PATCH", `/sessions/${a}`, { archived: false });
+      expect((await list()).map((s) => s.id).sort()).toEqual([a, b].sort());
+
+      const md = await call(sock, "GET", `/sessions/${a}/export`);
+      expect(md.json).toMatchObject({ filename: `mein-titel-${a}.md` });
+      expect(md.json.markdown).toContain("# Mein Titel");
+    } finally {
+      await close();
+    }
+  });
+
+  it("Store: Umbenennen bleibt bei neuen Nachrichten, latestSessionId überspringt Archiv, Export als Klartext", () => {
+    const db = agentDb();
+    const id = createSession(db, NOW);
+    updateSession(db, id, { title: "Eigener Titel" });
+    addMessage(db, id, { role: "user", html: "Hallo <b>Welt</b>" }, NOW + 1);
+    addMessage(db, id, { role: "agent", html: "Antwort" }, NOW + 2);
+    expect(getSession(db, id)?.title).toBe("Eigener Titel");
+    expect(updateSession(db, id, { title: "" })?.title).toBeNull();
+    updateSession(db, id, { archived: true });
+    expect(latestSessionId(db, NOW + 3)).not.toBe(id);
+    const out = exportMarkdown(db, id)!;
+    expect(out.markdown).toContain("Hallo Welt");
+    expect(out.markdown).toContain("## Agent");
+  });
+
   it("GET /feed: Token-Pflicht, `since` geprüft, Coding-Agents ohne Token, mit Zusammenfassung und letzten Texten", async () => {
     const { db, sock, coderState, close } = await serve();
     const coder = (id: string, status: string, updatedAt: number) =>

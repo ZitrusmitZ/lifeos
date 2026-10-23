@@ -8,7 +8,7 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 import { Sheet } from "@/components/ios/sheet";
 import { Button } from "@/components/ui/button";
 import { draftKey, isNearBottom, nodesToText, shouldSendOnEnter, splitLinks } from "@/lib/agent-input";
-import { parseAgentHtml, type AgentAttachment, type AgentMessage, type AgentNode, type AgentSession, type AgentStatus } from "@/lib/agent-html";
+import { parseAgentHtml, type AgentAttachment, type AgentMessage, type AgentNode, type AgentSession, type AgentSessionView, type AgentStatus } from "@/lib/agent-html";
 import { copyText } from "@/lib/clipboard";
 import { formatBytes } from "@/lib/files/types";
 import { haptic } from "@/lib/haptics";
@@ -72,13 +72,18 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<Rep
 }
 
 export const agentApi = {
-  sessions: (params: { before?: number; q?: string } = {}) => {
+  sessions: (params: { before?: number; q?: string; view?: AgentSessionView } = {}) => {
     const p = new URLSearchParams();
+    if (params.view && params.view !== "active") p.set("view", params.view);
     if (params.before) p.set("before", String(params.before));
     if (params.q) p.set("q", params.q);
     return call<{ sessions: AgentSession[]; status: AgentStatus }>("GET", `/api/agent/sessions${p.size ? `?${p}` : ""}`);
   },
+  /** Metadaten einer Unterhaltung (über den Nachrichten-Endpunkt mit `since` in der Zukunft, ohne Nachrichten) */
+  session: (id: number) => call<{ session: AgentSession }>("GET", `/api/agent/sessions/${id}?since=${Date.now() + 86_400_000}`),
   create: () => call<{ id: number }>("POST", "/api/agent/sessions"),
+  update: (id: number, patch: { title?: string | null; pinned?: boolean; archived?: boolean }) =>
+    call<{ session: AgentSession }>("PATCH", `/api/agent/sessions/${id}`, patch),
   remove: (id: number) => call<{ ok: boolean }>("DELETE", `/api/agent/sessions/${id}`),
 };
 

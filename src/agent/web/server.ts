@@ -10,14 +10,16 @@ import { attachmentsSchema } from "../uploads.ts";
 import { buildFeed, type FeedDeps } from "./feed.ts";
 import type { WebMessenger } from "./messenger.ts";
 import type { Transcriber } from "./stt.ts";
-import { addMessage, createSession, deleteSession, getSession, listMessages, listSessions } from "./store.ts";
+import { addMessage, createSession, deleteSession, exportMarkdown, getSession, listMessages, listSessions, updateSession, type SessionView } from "./store.ts";
 
 /**
  * HTTP-API für den Web-Chat, nur über einen Unix-Socket (Default `/run/lifeos-agent/web.sock`), den der LifeOS-Container
  * eingebunden bekommt. Kein TCP-Port: der Container (Bridge-Netz) käme an Host-Loopback ohnehin nicht heran.
  * Jede Anfrage braucht `Authorization: Bearer <CRON_TOKEN>` – derselbe Token, mit dem der Agent LifeOS aufruft.
  *
- *   GET    /sessions?before=&q=          Unterhaltungen (neueste zuerst)
+ *   GET    /sessions?before=&q=&view=    Unterhaltungen (Angeheftete, dann neueste); view = active (Standard) | pinned | archived
+ *   PATCH  /sessions/:id                 {title?, pinned?, archived?} umbenennen, anheften, archivieren/wiederherstellen
+ *   GET    /sessions/:id/export          {filename, markdown}
  *   POST   /sessions                     neue Unterhaltung
  *   GET    /sessions/:id/messages?since= Nachrichten (neu oder geändert seit `since`) + Status
  *   POST   /sessions/:id/messages        {text, attachments?} → 202, Antwort kommt asynchron
@@ -53,6 +55,11 @@ export type WebServerDeps = {
 const messageSchema = z
   .object({ text: z.string().trim().max(MAX_TEXT), attachments: attachmentsSchema.default([]) })
   .refine((m) => m.text.length > 0 || m.attachments.length > 0);
+const patchSchema = z
+  .object({ title: z.string().max(200).nullable().optional(), pinned: z.boolean().optional(), archived: z.boolean().optional() })
+  .strict()
+  .refine((p) => Object.keys(p).length > 0);
+const VIEWS = new Set<string>(["active", "pinned", "archived"]);
 const actionSchema = z.object({ data: z.string().regex(/^[cja]:[0-9a-f]{12}:[yn]$/) });
 
 const digest = (s: string) => createHash("sha256").update(s).digest();
@@ -109,7 +116,9 @@ export function createWebHandler(deps: WebServerDeps) {
 
     if (parts[0] === "sessions" && parts.length === 1) {
       if (method === "GET") {
-        const sessions = listSessions(deps.db, { before: num(url.searchParams.get("before")), q: url.searchParams.get("q") ?? undefined });
+        const view = url.searchParams.get("view") ?? "active";
+        if (!VIEWS.has(view)) throw new HttpError(400, "`view` muss active, pinned oder archived sein");
+        const sessions = listSessions(deps.db, { before: num(url.searchParams.get("before")), q: url.searchParams.get("q") ?? undefined, view: view as SessionView });
         return { status: 200, body: { sessions, status: deps.status() } };
       }
       if (method === "POST") return { status: 201, body: { id: createSession(deps.db, now()) } };
@@ -121,6 +130,12 @@ export function createWebHandler(deps: WebServerDeps) {
         deleteSession(deps.db, session.id);
         return { status: 200, body: { ok: true } };
       }
+      if (parts.length === 2 && method === "PATCH") {
+        const parsed = patchSchema.safeParse(await readJson(req));
+        if (!parsed.success) throw new HttpError(400, "Erlaubt: title (Text oder null), pinned, archived (Wahrheitswerte)");
+        return { status: 200, body: { session: updateSession(deps.db, session.id, parsed.data) } };
+      }
+      if (parts.length === 3 && parts[2] === "export" && method === "GET") return { status: 200, body: exportMarkdown(deps.db, session.id) };
       if (parts.length === 3 && parts[2] === "messages") {
         if (method === "GET") {
           const since = num(url.searchParams.get("since")) ?? 0;

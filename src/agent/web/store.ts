@@ -18,13 +18,15 @@ export type WebMessage = {
   createdAt: number;
   updatedAt: number;
 };
-export type WebSession = { id: number; title: string | null; createdAt: number; updatedAt: number; count: number };
+export type WebSession = { id: number; title: string | null; createdAt: number; updatedAt: number; count: number; pinned: boolean; archived: boolean };
+/** Ansicht der Liste: `active` = nicht archiviert (Angeheftete zuerst), `pinned` = nur Angeheftete, `archived` = nur Archiv */
+export type SessionView = "active" | "pinned" | "archived";
 
 const TITLE_MAX = 60;
 export const SESSION_PAGE = 30;
 
 type MessageRow = { id: number; role: WebRole; html: string; buttons: string | null; attachments: string | null; created_at: number; updated_at: number };
-type SessionRow = { id: number; title: string | null; created_at: number; updated_at: number; count: number };
+type SessionRow = { id: number; title: string | null; created_at: number; updated_at: number; count: number; pinned: number; archived: number };
 
 const toMessage = (r: MessageRow): WebMessage => ({
   id: r.id,
@@ -36,15 +38,15 @@ const toMessage = (r: MessageRow): WebMessage => ({
   updatedAt: r.updated_at,
 });
 
-const toSession = (r: SessionRow): WebSession => ({ id: r.id, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at, count: r.count });
+const toSession = (r: SessionRow): WebSession => ({ id: r.id, title: r.title, createdAt: r.created_at, updatedAt: r.updated_at, count: r.count, pinned: r.pinned === 1, archived: r.archived === 1 });
 
 export function createSession(db: AgentDB, now = Date.now()): number {
   return Number(db.prepare("INSERT INTO web_sessions (created_at, updated_at) VALUES (?, ?)").run(now, now).lastInsertRowid);
 }
 
-/** Jüngste Unterhaltung – Ziel für Nachrichten ohne Bezug (Briefing, Erinnerungen ohne Telegram). Legt bei Bedarf eine an. */
+/** Jüngste nicht archivierte Unterhaltung – Ziel für Nachrichten ohne Bezug (Briefing, Erinnerungen ohne Telegram). Legt bei Bedarf eine an. */
 export function latestSessionId(db: AgentDB, now = Date.now()): number {
-  const row = db.prepare("SELECT id FROM web_sessions ORDER BY updated_at DESC, id DESC LIMIT 1").get() as { id: number } | undefined;
+  const row = db.prepare("SELECT id FROM web_sessions WHERE archived = 0 ORDER BY updated_at DESC, id DESC LIMIT 1").get() as { id: number } | undefined;
   return row?.id ?? createSession(db, now);
 }
 
@@ -55,12 +57,17 @@ export function getSession(db: AgentDB, id: number): WebSession | null {
   return row ? toSession(row) : null;
 }
 
-/** Neueste zuerst; `before` = `updatedAt` der letzten Zeile der vorigen Seite, `q` sucht im Text aller Nachrichten. */
-export function listSessions(db: AgentDB, opts: { before?: number; q?: string; limit?: number } = {}): WebSession[] {
-  const where: string[] = [];
+/**
+ * Angeheftete zuerst, dann neueste zuerst; `before` = `updatedAt` der letzten Zeile der vorigen Seite (blättert nur durch
+ * die nicht angehefteten), `q` sucht in Titeln und im Text aller Nachrichten. Ohne `view` nur nicht archivierte.
+ */
+export function listSessions(db: AgentDB, opts: { before?: number; q?: string; limit?: number; view?: SessionView } = {}): WebSession[] {
+  const view = opts.view ?? "active";
+  const where: string[] = [view === "archived" ? "s.archived = 1" : "s.archived = 0"];
   const args: (number | string)[] = [];
+  if (view === "pinned") where.push("s.pinned = 1");
   if (opts.before !== undefined) {
-    where.push("s.updated_at < ?");
+    where.push("s.pinned = 0 AND s.updated_at < ?");
     args.push(opts.before);
   }
   const q = opts.q?.trim();
@@ -73,10 +80,40 @@ export function listSessions(db: AgentDB, opts: { before?: number; q?: string; l
   const rows = db
     .prepare(
       `SELECT s.*, (SELECT COUNT(*) FROM web_messages m WHERE m.session_id = s.id) AS count FROM web_sessions s
-       ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY s.updated_at DESC, s.id DESC LIMIT ?`,
+       WHERE ${where.join(" AND ")} ORDER BY s.pinned DESC, s.updated_at DESC, s.id DESC LIMIT ?`,
     )
     .all(...args) as SessionRow[];
   return rows.map(toSession);
+}
+
+/** Titel (leer = zurück auf automatischen Titel), Anheften, Archivieren. Archivieren löst die Anheftung. Ändert `updatedAt` nicht. */
+export function updateSession(db: AgentDB, id: number, patch: { title?: string | null; pinned?: boolean; archived?: boolean }): WebSession | null {
+  if (!getSession(db, id)) return null;
+  if (patch.title !== undefined) {
+    const title = patch.title?.replace(/\s+/g, " ").trim().slice(0, TITLE_MAX) || null;
+    db.prepare("UPDATE web_sessions SET title = ? WHERE id = ?").run(title, id);
+  }
+  if (patch.archived !== undefined) {
+    // Archivierte sind nie angeheftet
+    db.prepare("UPDATE web_sessions SET archived = ?, pinned = CASE WHEN ? = 1 THEN 0 ELSE pinned END WHERE id = ?").run(patch.archived ? 1 : 0, patch.archived ? 1 : 0, id);
+  }
+  if (patch.pinned !== undefined) db.prepare("UPDATE web_sessions SET pinned = ? WHERE id = ? AND archived = 0").run(patch.pinned ? 1 : 0, id);
+  return getSession(db, id);
+}
+
+/** Verlauf als Markdown (Nachrichten im Telegram-HTML-Subset werden zu Klartext). */
+export function exportMarkdown(db: AgentDB, id: number): { filename: string; markdown: string } | null {
+  const session = getSession(db, id);
+  if (!session) return null;
+  const title = session.title ?? "Neue Unterhaltung";
+  const lines = [`# ${title}`, "", `_${new Date(session.createdAt).toISOString()}_`, ""];
+  for (const m of listMessages(db, id)) {
+    lines.push(`## ${m.role === "user" ? "Luis" : "Agent"} · ${new Date(m.createdAt).toISOString()}`, "", htmlToPlain(m.html).trim());
+    if (m.attachments?.length) lines.push("", ...m.attachments.map((a) => `- 📎 ${a.name}`));
+    lines.push("");
+  }
+  const slug = title.toLowerCase().replace(/[^a-z0-9äöüß]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "unterhaltung";
+  return { filename: `${slug}-${id}.md`, markdown: lines.join("\n") };
 }
 
 export function deleteSession(db: AgentDB, id: number): boolean {

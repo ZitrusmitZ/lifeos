@@ -10,6 +10,8 @@ export async function GET(request: Request) {
   const q = from.get("q")?.trim().slice(0, 100);
   if (before && /^\d+$/.test(before)) params.set("before", before);
   if (q) params.set("q", q);
+  const view = from.get("view");
+  if (view === "pinned" || view === "archived") params.set("view", view);
   return agentResponse(await agentRequest("GET", `/sessions${params.size ? `?${params}` : ""}`));
 }
 
