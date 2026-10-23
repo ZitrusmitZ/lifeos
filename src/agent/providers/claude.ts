@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { addDays, localClock, zonedToEpoch } from "../../lib/time.ts";
+import { APPROVE_SERVER, APPROVE_TOOL } from "../mcp/approve-server.ts";
 import { ProviderError, QuotaError, type CompletionRequest, type CompletionResult, type Provider } from "./types.ts";
 
 /**
@@ -197,25 +198,39 @@ export type ConnectorOptions = {
   timeoutMs: number;
 };
 
-export const APPROVE_SERVER = "lifeos_approve";
-export const APPROVE_PROMPT_TOOL = `mcp__${APPROVE_SERVER}__approve`;
+export { APPROVE_SERVER, ROOT_TOOL_NAME } from "../mcp/approve-server.ts";
+export const APPROVE_PROMPT_TOOL = `mcp__${APPROVE_SERVER}__${APPROVE_TOOL}`;
 
 /** MCP-Konfiguration für den Freigabe-Server; als Datei (0600), damit der Token nicht in `ps` auftaucht. */
-export function writeApproveConfig(c: ConnectorOptions, endpoint: { socketPath: string; token: string }, chatId: number): string {
+export function writeApproveConfig(
+  c: ConnectorOptions,
+  endpoint: { socketPath: string; token: string },
+  chatId: number,
+  opts: { root?: boolean; file?: string } = {},
+): string {
   mkdirSync(c.tmpDir, { recursive: true, mode: 0o700 });
-  const file = path.join(c.tmpDir, `approve-${randomBytes(6).toString("hex")}.json`);
-  const config = {
+  const file = opts.file ?? path.join(c.tmpDir, `approve-${randomBytes(6).toString("hex")}.json`);
+  writeFileSync(file, JSON.stringify(approveConfig(c.approveScript, endpoint, chatId, opts.root)), { mode: 0o600 });
+  return file;
+}
+
+/** MCP-Konfiguration (`--mcp-config`) des Freigabe-Servers; `root` schaltet das Tool root_command frei. */
+export function approveConfig(approveScript: string, endpoint: { socketPath: string; token: string }, chatId: number, root = false) {
+  return {
     mcpServers: {
       [APPROVE_SERVER]: {
         type: "stdio",
         command: process.execPath,
-        args: ["--disable-warning=ExperimentalWarning", c.approveScript],
-        env: { LIFEOS_APPROVE_SOCKET: endpoint.socketPath, LIFEOS_APPROVE_TOKEN: endpoint.token, LIFEOS_APPROVE_CHAT: String(chatId) },
+        args: ["--disable-warning=ExperimentalWarning", approveScript],
+        env: {
+          LIFEOS_APPROVE_SOCKET: endpoint.socketPath,
+          LIFEOS_APPROVE_TOKEN: endpoint.token,
+          LIFEOS_APPROVE_CHAT: String(chatId),
+          ...(root ? { LIFEOS_APPROVE_ROOT: "1" } : {}),
+        },
       },
     },
   };
-  writeFileSync(file, JSON.stringify(config), { mode: 0o600 });
-  return file;
 }
 
 export class ClaudeProvider implements Provider {
@@ -289,12 +304,13 @@ export class ClaudeProvider implements Provider {
     prompt: string,
     opts: ClaudeRunOptions,
     chatId: number | undefined,
-    extra: { cwd?: string; timeoutMs?: number; onProgress?: () => void } = {},
+    extra: { cwd?: string; timeoutMs?: number; onProgress?: () => void; root?: boolean } = {},
   ): Promise<CompletionResult> {
     const a = this.o.taskApproval;
     const endpoint = a && chatId !== undefined ? a.endpoint() : null;
     if (!a || !endpoint || chatId === undefined) return this.run(prompt, { ...opts, askTools: undefined, approval: undefined }, extra);
-    const file = writeApproveConfig(a, endpoint, chatId);
+    // root: zusätzlich das Tool root_command (jeder Aufruf nur nach Klick, einmalige Freigabe pro Befehl)
+    const file = writeApproveConfig(a, endpoint, chatId, { root: extra.root });
     try {
       return await this.run(prompt, { ...opts, approval: { mcpConfigFile: file, promptTool: APPROVE_PROMPT_TOOL } }, {
         ...extra,

@@ -116,6 +116,24 @@ const MIGRATIONS: string[] = [
   CREATE INDEX web_messages_session ON web_messages (session_id, id);
   CREATE INDEX web_sessions_updated ON web_sessions (updated_at);
   `,
+  `
+  -- Coding-Agents (Claude Code als Luis in eigenem Worktree); token = Zugang zum Freigabe-Socket dieser Sitzung
+  CREATE TABLE coding_sessions (
+    id          TEXT PRIMARY KEY,
+    repo        TEXT NOT NULL,
+    task        TEXT NOT NULL,
+    chat_id     INTEGER NOT NULL,
+    token       TEXT NOT NULL UNIQUE,
+    status      TEXT NOT NULL DEFAULT 'starting', -- 'starting' | 'running' | 'done' | 'failed' | 'stopped' | 'quota'
+    provider    TEXT,                             -- 'claude' | 'freellm'
+    pr_url      TEXT,
+    detail      TEXT,
+    notified    TEXT,                             -- zuletzt gemeldeter Zustand (status:provider)
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+  );
+  CREATE INDEX coding_sessions_status ON coding_sessions (status, created_at);
+  `,
 ];
 
 export type AgentDB = DatabaseSync;

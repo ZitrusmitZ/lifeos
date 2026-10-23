@@ -102,6 +102,12 @@ export function matchToolIntent(input: string, knownServices: string[], now: Dat
 
   if (DEPLOY_RE.test(text)) return { tool: "lifeos_deploy", params: {} };
 
+  const root = input.trim().match(/^(?:sudo|root\s*:)\s+([\s\S]+)$/i);
+  if (root) return { tool: "server_command", params: { command: root[1].trim() } };
+
+  const coder = matchCoderIntent(input);
+  if (coder) return coder;
+
   const task = input.trim().match(/^(?:aufgabe|task)\s*:\s*([\s\S]+)$/i);
   if (task) return { tool: "run_task", params: { description: task[1] } };
 
@@ -109,6 +115,20 @@ export function matchToolIntent(input: string, knownServices: string[], now: Dat
   if (homeserver) return homeserver;
 
   if (lower === "minecraft") return { tool: "minecraft_status", params: {} };
+  return null;
+}
+
+/** „code lifeos: …“, „starte einen Coding-Agent in lifeos: …“, „code status [id]“, „code stop <id>“ */
+export function matchCoderIntent(input: string): ToolIntent | null {
+  const text = input.trim();
+  const status = text.match(/^(?:code|coding[- ]?agents?|coder)[- ]?status(?:\s+([0-9a-f]{12}))?[.!?]?$/i);
+  if (status) return { tool: "code_status", params: status[1] ? { id: status[1] } : {} };
+  const stop = text.match(/^(?:code|coding[- ]?agent|coder)[- ]?stop(?:pen)?\s+([0-9a-f]{12})[.!?]?$/i);
+  if (stop) return { tool: "code_stop", params: { id: stop[1] } };
+  const start =
+    text.match(/^(?:code|coder|coding[- ]?agent)\s+(?:in\s+|für\s+)?([a-z0-9][\w.-]*)\s*:\s*([\s\S]+)$/i) ??
+    text.match(/^(?:bitte\s+)?starte?\s+(?:einen\s+|den\s+)?(?:coding[- ]?agent(?:en)?|coder)\s+(?:in|für|im)\s+(?:repo\s+)?([a-z0-9][\w.-]*)\s*:\s*([\s\S]+)$/i);
+  if (start) return { tool: "code_start", params: { repo: start[1].toLowerCase(), task: start[2].trim() } };
   return null;
 }
 
@@ -166,7 +186,7 @@ export async function pickToolWithLlm(local: Provider, model: string, text: stri
   const system =
     `Wähle für die Nachricht genau ein Tool oder keins. Antworte NUR mit JSON: {"tool":"<name>|null","params":{...}}.\n` +
     `Tools:\n${list}\nDienste: ${knownServices.join(", ")}.\n` +
-    `Parameter: calendar_events: {"offset" (Tage ab heute, 0–6),"days" (1–7)}, service_*: {"name"}, service_logs: {"name","n"}, backup_run: {"target"}, git_pull_project: {"name"}, minecraft_say: {"text"}, run_task: {"description","dir"?}, lifeos_deploy: {}, ` +
+    `Parameter: calendar_events: {"offset" (Tage ab heute, 0–6),"days" (1–7)}, service_*: {"name"}, service_logs: {"name","n"}, backup_run: {"target"}, git_pull_project: {"name"}, minecraft_say: {"text"}, run_task: {"description","dir"?}, lifeos_deploy: {}, server_command: {"command","reason"}, code_start: {"repo","task"}, code_status: {"id"?}, code_stop: {"id"}, ` +
     `pihole_pause: {"minutes"?}, pihole_domain: {"op":"add|remove","type":"allow|deny","kind":"exact|regex","domain"}.`;
   try {
     const res = await local.complete({ prompt: text.slice(0, 1000), system, model, json: true });
