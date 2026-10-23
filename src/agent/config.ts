@@ -87,18 +87,18 @@ const schema = z.object({
   AGENT_API_PRICE_IN_PER_MTOK: z.preprocess(emptyAsUnset, z.coerce.number().positive().optional()),
   AGENT_API_PRICE_OUT_PER_MTOK: z.preprocess(emptyAsUnset, z.coerce.number().positive().optional()),
 
-  // ── FreeLLM (lokaler LiteLLM-Proxy mit kostenlosen Kontingenten) ──
+  // ── FreeLLM (FreeLLMAPI: ein Key, kostenlose Anbieter, OpenAI-kompatibel) ──
   /** Springt ein, wenn das Pro-Kontingent leer ist oder Claude nicht eingeloggt ist (nur Chat, keine Tools) */
   ENABLE_FREE_PROVIDER: bool(false),
-  FREE_LLM_URL: str("http://127.0.0.1:4000"),
+  FREE_LLM_URL: str("http://127.0.0.1:3001"),
   FREE_LLM_KEY: optional,
-  FREE_LLM_MODEL: str("free"),
+  FREE_LLM_MODEL: str("auto"),
   FREE_LLM_TIMEOUT_MS: num(120_000),
 
   // ── Server-Tools ──────────────────────────────────────────────────
   /** Name:Art, Art = systemd | docker. Muss zu /etc/lifeos-agent/helper.conf passen (der Helfer prüft selbst nochmal). */
   AGENT_SERVICES: list(
-    "ollama:systemd,tailscaled:systemd,playit:systemd,lifeos:docker,minecraft:docker,pihole:docker,nextcloud:docker,nextcloud-db:docker,litellm:docker",
+    "ollama:systemd,tailscaled:systemd,playit:systemd,lifeos:docker,minecraft:docker,pihole:docker,nextcloud:docker,nextcloud-db:docker",
   ),
   AGENT_BACKUP_TARGETS: list("lifeos,minecraft,offsite"),
   AGENT_GIT_PROJECTS: list("lifeos"),
