@@ -228,6 +228,8 @@ async function main(): Promise<void> {
       web,
       token: cfg.LIFEOS_CRON_TOKEN,
       status: () => ({ telegram: telegramOn, claude: state.claude, ollama: state.ollama, dryRun: cfg.AGENT_DRY_RUN }),
+      approvals,
+      coderState: cfg.AGENT_CODER_STATE,
     }).catch((err) => {
       log.warn("web", `Web-Chat nicht gestartet (${cfg.AGENT_WEB_SOCKET}): ${(err as Error).message}`);
       return null;

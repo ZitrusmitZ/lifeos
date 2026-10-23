@@ -136,6 +136,11 @@ export class ApprovalBroker {
   pending(): number {
     return this.waiting.size;
   }
+
+  /** Wartet die CLI noch auf diese Freigabe? Nach einem Neustart des Agenten nicht mehr – die Zeile ist dann verwaist. */
+  isWaiting(id: string): boolean {
+    return this.waiting.has(id);
+  }
 }
 
 const bodySchema = z.object({ chatId: z.number().int(), tool: z.string().min(1).max(200), input: z.record(z.string(), z.unknown()) });

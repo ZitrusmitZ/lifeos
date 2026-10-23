@@ -7,6 +7,7 @@ import type { Gateway } from "../gateway.ts";
 import { log } from "../log.ts";
 import { escapeHtml } from "../telegram/format.ts";
 import { attachmentsSchema } from "../uploads.ts";
+import { buildFeed, type FeedDeps } from "./feed.ts";
 import type { WebMessenger } from "./messenger.ts";
 import { addMessage, createSession, deleteSession, getSession, listMessages, listSessions } from "./store.ts";
 
@@ -22,6 +23,7 @@ import { addMessage, createSession, deleteSession, getSession, listMessages, lis
  *                                        (Anhänge: nur Pfade – die Dateien hat LifeOS schon in Nextcloud abgelegt)
  *   DELETE /sessions/:id
  *   POST   /actions                      {data} Button-Klick
+ *   GET    /feed?since=                  offene Freigaben aller Chats, Coding-Agents, „tippt…“ (Laptop-Island, siehe feed.ts)
  */
 
 export const MAX_TEXT = 4000;
@@ -35,6 +37,9 @@ export type WebServerDeps = {
   web: WebMessenger;
   token: string;
   status: () => WebStatus;
+  /** Für `/feed`: offene Connector-Freigaben (nur im Speicher) und Status-Verzeichnis der Coding-Agents */
+  approvals?: FeedDeps["approvals"];
+  coderState?: string;
   now?: () => number;
 };
 
@@ -124,6 +129,13 @@ export function createWebHandler(deps: WebServerDeps) {
           return { status: 202, body: { id } };
         }
       }
+    }
+
+    if (parts[0] === "feed" && parts.length === 1 && method === "GET") {
+      const raw = url.searchParams.get("since");
+      const since = num(raw);
+      if (raw !== null && since === undefined) throw new HttpError(400, "`since` muss eine Zahl (ms) sein");
+      return { status: 200, body: buildFeed(deps, now(), since) };
     }
 
     if (parts[0] === "actions" && parts.length === 1 && method === "POST") {

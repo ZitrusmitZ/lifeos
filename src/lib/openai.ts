@@ -7,6 +7,8 @@ import { today, zonedToEpoch } from "./time";
 const PRICES: Record<string, [number, number]> = {
   "gpt-6-luna": [0.1, 0.5],
   "gpt-5.4-mini": [0.75, 4.5],
+  // TypeSafe Jev über OpenRouter (Island): nur Eingabe kostet
+  "typesafe/jev-1.13": [0.042, 0],
 };
 const FALLBACK_PRICE: [number, number] = [2, 8];
 
@@ -25,6 +27,24 @@ export function monthSpendUsd(db: DB, now = new Date()): number {
 
 export class BudgetExceededError extends Error {}
 
+/** Vor jedem bezahlten Aufruf: Monatsbudget (gilt für alle Zwecke zusammen – Mail, Jobs, Jev, Spracherkennung). */
+export function assertBudget(db: DB): void {
+  const budget = env().OPENAI_MONTHLY_BUDGET_USD;
+  if (monthSpendUsd(db) >= budget) throw new BudgetExceededError(`KI-Monatsbudget von ${budget} $ erreicht`);
+}
+
+/** Verbrauch in `llm_usage` buchen; ohne `usd` nach Token-Preisliste. */
+export function recordUsage(db: DB, u: { model: string; purpose: string; input: number; output: number; usd?: number }, at = Date.now()): void {
+  db.prepare("INSERT INTO llm_usage (at, model, purpose, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?)").run(
+    at,
+    u.model,
+    u.purpose,
+    u.input,
+    u.output,
+    u.usd ?? costUsd(u.model, u.input, u.output),
+  );
+}
+
 export type ResponsesApiResult = {
   output?: { type: string; content?: { type: string; text?: string }[] }[];
   usage?: { input_tokens: number; output_tokens: number };
@@ -39,9 +59,9 @@ export async function structuredCompletion<T>(
   db: DB,
   opts: { purpose: string; instructions: string; input: string; schemaName: string; schema: Record<string, unknown> },
 ): Promise<T> {
-  const { OPENAI_API_KEY: key, OPENAI_MODEL: model, OPENAI_MONTHLY_BUDGET_USD: budget } = env();
+  const { OPENAI_API_KEY: key, OPENAI_MODEL: model } = env();
   if (!key) throw new Error("OPENAI_API_KEY fehlt");
-  if (monthSpendUsd(db) >= budget) throw new BudgetExceededError(`KI-Monatsbudget von ${budget} $ erreicht`);
+  assertBudget(db);
 
   const body = {
     model,
@@ -76,14 +96,7 @@ export async function structuredCompletion<T>(
   if (!res.ok) throw new Error(`OpenAI ${res.status}: ${json.error?.message ?? "Fehler"}`);
 
   const usage = json.usage ?? { input_tokens: 0, output_tokens: 0 };
-  db.prepare("INSERT INTO llm_usage (at, model, purpose, input_tokens, output_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?)").run(
-    Date.now(),
-    model,
-    opts.purpose,
-    usage.input_tokens,
-    usage.output_tokens,
-    costUsd(model, usage.input_tokens, usage.output_tokens),
-  );
+  recordUsage(db, { model, purpose: opts.purpose, input: usage.input_tokens, output: usage.output_tokens });
 
   return extractJson<T>(json);
 }
