@@ -64,6 +64,13 @@ const schema = z.object({
   /** Arbeitsverzeichnis für `run_task` */
   AGENT_TASK_DIR: str("/var/lib/lifeos-agent/workspace"),
   /**
+   * Weitere Ordner, in denen `run_task` Dateien lesen und bearbeiten darf (absolut). Müssen für den Nutzer lifeos
+   * beschreibbar sein und in der systemd-Unit freigegeben (macht `install_agent.sh` aus dieser Liste).
+   */
+  AGENT_FILE_DIRS: list("/srv/homeserver").transform((dirs) => dirs.filter((d) => d.startsWith("/") && !d.includes(".."))),
+  /** `run_task` darf Befehle ausführen (als Nutzer lifeos) – jeder einzelne erst nach „Ausführen“ im Chat */
+  AGENT_TASK_SHELL: bool(true),
+  /**
    * claude.ai-Connectors (Gmail, Google Calendar, Notion, Composio, Canva …) für Claude-Antworten. Braucht einen
    * normalen claude.ai-Login des Nutzers lifeos (`claude auth login`) – das setup-token wird dann nicht genutzt.
    * Lesende Tools laufen sofort, ändernde erst nach „Ausführen“ im Chat.
@@ -80,9 +87,19 @@ const schema = z.object({
   AGENT_API_PRICE_IN_PER_MTOK: z.preprocess(emptyAsUnset, z.coerce.number().positive().optional()),
   AGENT_API_PRICE_OUT_PER_MTOK: z.preprocess(emptyAsUnset, z.coerce.number().positive().optional()),
 
+  // ── FreeLLM (lokaler LiteLLM-Proxy mit kostenlosen Kontingenten) ──
+  /** Springt ein, wenn das Pro-Kontingent leer ist oder Claude nicht eingeloggt ist (nur Chat, keine Tools) */
+  ENABLE_FREE_PROVIDER: bool(false),
+  FREE_LLM_URL: str("http://127.0.0.1:4000"),
+  FREE_LLM_KEY: optional,
+  FREE_LLM_MODEL: str("free"),
+  FREE_LLM_TIMEOUT_MS: num(120_000),
+
   // ── Server-Tools ──────────────────────────────────────────────────
   /** Name:Art, Art = systemd | docker. Muss zu /etc/lifeos-agent/helper.conf passen (der Helfer prüft selbst nochmal). */
-  AGENT_SERVICES: list("ollama:systemd,tailscaled:systemd,playit:systemd,lifeos:docker,minecraft:docker,pihole:docker,nextcloud:docker,nextcloud-db:docker"),
+  AGENT_SERVICES: list(
+    "ollama:systemd,tailscaled:systemd,playit:systemd,lifeos:docker,minecraft:docker,pihole:docker,nextcloud:docker,nextcloud-db:docker,litellm:docker",
+  ),
   AGENT_BACKUP_TARGETS: list("lifeos,minecraft,offsite"),
   AGENT_GIT_PROJECTS: list("lifeos"),
   AGENT_HELPER: str("/usr/local/lib/lifeos-agent/helper"),

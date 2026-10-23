@@ -1,6 +1,6 @@
 /** Gemeinsames Interface aller Modell-Anbieter. Der Router kennt nur dieses Interface. */
 
-export type ProviderName = "local" | "claude" | "api";
+export type ProviderName = "local" | "claude" | "api" | "free";
 export type Complexity = "trivial" | "simple" | "complex" | "hard";
 
 export type CompletionRequest = {

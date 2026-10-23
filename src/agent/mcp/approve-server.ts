@@ -55,7 +55,8 @@ function askAgent(tool: string, input: Record<string, unknown>): Promise<{ allow
 }
 
 export async function decide(toolName: string, input: Record<string, unknown>, ask = askAgent): Promise<Decision> {
-  if (isReadOnlyTool(toolName)) return { behavior: "allow", updatedInput: input };
+  // nur lesende MCP-Tools ohne Rückfrage; eingebaute Tools (Bash, Read außerhalb der freigegebenen Ordner …) immer fragen
+  if (toolName.startsWith("mcp__") && isReadOnlyTool(toolName)) return { behavior: "allow", updatedInput: input };
   const res = await ask(toolName, input);
   return res.allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: res.message ?? "Von Luis abgelehnt" };
 }

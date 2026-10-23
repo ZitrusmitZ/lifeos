@@ -25,6 +25,9 @@ function setup() {
   return { db, local, claude, api, router };
 }
 
+/** Deps eines bestehenden Routers wiederverwenden (gleiche DB und Fakes) */
+const routerDeps = (r: Router) => (r as unknown as { d: ConstructorParameters<typeof Router>[0] }).d;
+
 const cls = (complexity: Classification["complexity"]): Classification => ({ complexity, needs_tools: false, category: "chat" });
 
 describe("Klassifikation", () => {
@@ -162,6 +165,45 @@ describe("Kontingent-Ende", () => {
     const a = await router.answer(LUIS, "Frage", cls("complex"), "test");
     expect(a.decision.provider).toBe("local");
     expect(a.notice).toMatch(/nicht eingeloggt/);
+  });
+
+  it("FreeLLM springt bei leerem Kontingent ein – auch für complex/hard, ohne Queue", async () => {
+    const { router, claude, db, local } = setup();
+    const free = new FakeProvider("free", () => "freie Antwort");
+    const r = new Router({ ...routerDeps(router), free });
+    claude.respond(() => {
+      throw new QuotaError("limit", NOW + 3_600_000);
+    });
+    const a = await r.answer(LUIS, "Schreib mir einen Plan", cls("hard"), "test");
+    expect(a.text).toBe("freie Antwort");
+    expect(a.decision.provider).toBe("free");
+    expect(a.notice).toMatch(/über FreeLLM/);
+    expect(a.queuedId).toBeUndefined();
+    expect(queuedTasks(db)).toHaveLength(0);
+    expect(local.calls).toHaveLength(0);
+    expect(lastDecision(db)?.provider).toBe("free");
+  });
+
+  it("Connector-Anfragen gehen nicht an FreeLLM, sondern in die Queue", async () => {
+    const { router, db } = setup();
+    const free = new FakeProvider("free");
+    const r = new Router({ ...routerDeps(router), free });
+    markQuotaExhausted(db, NOW + 3_600_000, NOW);
+    const a = await r.answer(LUIS, "Was steht in meinen Mails?", cls("complex"), "test", { connectors: true });
+    expect(free.calls).toHaveLength(0);
+    expect(a.queuedId).toBeDefined();
+  });
+
+  it("FreeLLM-Fehler → altes Verhalten (Queue)", async () => {
+    const { router, db } = setup();
+    const free = new FakeProvider("free", () => {
+      throw new ProviderError("FreeLLM: 429");
+    });
+    const r = new Router({ ...routerDeps(router), free });
+    markQuotaExhausted(db, NOW + 3_600_000, NOW);
+    const a = await r.answer(LUIS, "Plan", cls("complex"), "test");
+    expect(free.calls).toHaveLength(1);
+    expect(a.queuedId).toBeDefined();
   });
 
   it("Queue-Einträge bleiben persistent", () => {
