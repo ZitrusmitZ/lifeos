@@ -9,6 +9,7 @@ import {
   chunkLength,
   joinPath,
   MAX_FILE_BYTES,
+  MAX_UPLOAD_BYTES,
   NextcloudError,
   numberedName,
   pathSegments,
@@ -181,6 +182,94 @@ export async function abortUpload(id: string): Promise<void> {
   if (!row) return;
   await client().abortChunked(row.id);
   deleteUpload(db(), row.id);
+}
+
+// ─── Agent: Eingang und Ablage ────────────────────────────────────────────────────────────────────
+
+/** Dateien, die Luis dem Agenten schickt, landen hier; verschoben wird erst nach dem Button im Chat. */
+export const AGENT_INBOX = `${UPLOAD_DIR}/Agent`;
+export const AGENT_MAX_FILES = 10;
+
+export type InboxFile = { path: string; name: string; size: number };
+
+/** Datei in den Agenten-Eingang legen; vorhandene Namen werden nummeriert („a (2).pdf“). */
+export async function saveToAgentInbox(file: File): Promise<InboxFile> {
+  if (file.size > MAX_UPLOAD_BYTES) throw new FilesError(`„${file.name}“ ist zu groß (max. ${MAX_UPLOAD_BYTES / 1024 / 1024} MB)`, 413);
+  const c = client();
+  const segments = await freePath(c, uploadPath(AGENT_INBOX, file.name));
+  const name = segments.at(-1) as string;
+  const path = await c.upload(AGENT_INBOX, name, file, file.type);
+  touched();
+  return { path, name, size: file.size };
+}
+
+/** Ordner bis `depth` Ebenen tief (ohne führenden Schrägstrich) – Auswahl für den Zielordner des Agenten. */
+export async function listDirs(depth = 3, max = 300): Promise<string[]> {
+  const c = client();
+  const out: string[] = [];
+  let level = [""];
+  for (let d = 0; d < depth && level.length && out.length < max; d++) {
+    const next: string[] = [];
+    for (const dir of level) {
+      const res = await c.list(dir || "/");
+      for (const e of res?.entries ?? []) {
+        if (!e.isDir || out.length >= max) continue;
+        const rel = e.path.replace(/^\/+/, "");
+        out.push(rel);
+        next.push(rel);
+      }
+    }
+    level = next;
+  }
+  return out;
+}
+
+/** Liegt der Pfad direkt im Agenten-Eingang? Nur von dort darf der Agent verschieben. */
+function inboxSegments(path: string): string[] {
+  const segments = pathSegments(path);
+  const inbox = pathSegments(AGENT_INBOX);
+  if (segments.length !== inbox.length + 1 || inbox.some((s, i) => segments[i] !== s)) {
+    throw new FilesError("Der Agent verschiebt nur Dateien aus dem Agenten-Eingang", 403);
+  }
+  return segments;
+}
+
+/**
+ * Hochgeladene Dateien aus dem Agenten-Eingang in `targetDir` verschieben (vorher bestätigt per Button).
+ * `create`: Zielordner anlegen, falls es ihn nicht gibt. Namenskonflikte am Ziel werden nummeriert, nie überschrieben.
+ */
+export async function fileAgentUploads(paths: string[], targetDir: string, create: boolean): Promise<{ message: string; moved: string[]; failed: string[] }> {
+  if (!paths.length || paths.length > AGENT_MAX_FILES) throw new FilesError(`1–${AGENT_MAX_FILES} Dateien`);
+  const sources = paths.map(inboxSegments);
+  const target = pathSegments(targetDir);
+  if (!target.length) throw new FilesError("Zielordner fehlt");
+  if (joinPath(target).startsWith(`/${AGENT_INBOX}`)) throw new FilesError("Ziel darf nicht der Agenten-Eingang sein");
+  const c = client();
+  const dir = await c.stat(joinPath(target));
+  if (dir && !dir.isDir) throw new FilesError("Am Ziel liegt eine Datei, kein Ordner");
+  let created = false;
+  if (!dir) {
+    if (!create) throw new FilesError(`Ordner „${joinPath(target)}“ gibt es nicht`, 404);
+    await c.mkdir(joinPath(target));
+    created = true;
+  }
+  const moved: string[] = [];
+  const failed: string[] = [];
+  for (const src of sources) {
+    const name = src.at(-1) as string;
+    try {
+      const dst = await freePath(c, [...target, name]);
+      await c.move(joinPath(src), joinPath(dst));
+      moved.push(dst.at(-1) as string);
+    } catch (err) {
+      failed.push(`${name} (${message(err)})`);
+    }
+  }
+  touched();
+  const where = `${joinPath(target)}${created ? " (neu angelegt)" : ""}`;
+  const what = moved.length === 1 ? `„${moved[0]}“` : `${moved.length} Dateien`;
+  const note = failed.length ? ` · nicht verschoben: ${failed.join(", ")}` : "";
+  return { message: moved.length ? `${what} nach ${where} verschoben${note}` : `Nichts verschoben${note}`, moved, failed };
 }
 
 // ─── Teilen ───────────────────────────────────────────────────────────────────────────────────────

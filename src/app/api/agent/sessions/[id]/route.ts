@@ -17,7 +17,15 @@ export async function GET(request: Request, ctx: RouteContext<"/api/agent/sessio
   return agentResponse(await agentRequest("GET", `/sessions/${id}/messages${since && /^\d+$/.test(since) ? `?since=${since}` : ""}`));
 }
 
-const sendSchema = z.object({ text: z.string().trim().min(1).max(4000) });
+const INBOX = "/00 Eingang/Agent/";
+const attachment = z.object({
+  path: z.string().max(500).refine((p) => p.startsWith(INBOX) && !p.slice(INBOX.length).includes("/") && p.length > INBOX.length),
+  name: z.string().trim().min(1).max(255),
+  size: z.number().int().min(0),
+});
+const sendSchema = z
+  .object({ text: z.string().trim().max(4000), attachments: z.array(attachment).max(10).default([]) })
+  .refine((m) => m.text.length > 0 || m.attachments.length > 0);
 
 export async function POST(request: Request, ctx: RouteContext<"/api/agent/sessions/[id]">) {
   await connection();

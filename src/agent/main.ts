@@ -90,7 +90,7 @@ async function main(): Promise<void> {
       return null;
     });
   }
-  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, approvals });
+  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, approvals, files: telegram ?? undefined });
   if (approvalEndpoint) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
   const sampler = new MemSampler();
 

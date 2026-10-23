@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Provider } from "../providers/types.ts";
+import { validateTarget, type Attachment } from "../uploads.ts";
 import { TOOLS } from "./registry.ts";
 import { today } from "../../lib/time.ts";
 
@@ -148,6 +149,9 @@ export function looksLikeSchedule(text: string): boolean {
   return /^(?:bitte\s+)?(?:erinnere?\s+mich|jeden|jede|täglich|werktags|wochentags|am wochenende|alle\s+\d+\s+(?:minuten|stunden))\b/i.test(text.trim());
 }
 
+/** Nur über eigene Wege erreichbar (z. B. `nextcloud_move` nur mit hochgeladenen Dateien). */
+const NOT_PICKABLE = new Set(["nextcloud_move"]);
+
 const pickSchema = z.object({ tool: z.string().nullable(), params: z.record(z.string(), z.unknown()).optional() });
 
 /**
@@ -156,7 +160,9 @@ const pickSchema = z.object({ tool: z.string().nullable(), params: z.record(z.st
  */
 export async function pickToolWithLlm(local: Provider, model: string, text: string, knownServices: string[]): Promise<ToolIntent | null> {
   if (!local.available()) return null;
-  const list = TOOLS.map((t) => `- ${t.name}: ${t.description}`).join("\n");
+  const list = TOOLS.filter((t) => !NOT_PICKABLE.has(t.name))
+    .map((t) => `- ${t.name}: ${t.description}`)
+    .join("\n");
   const system =
     `Wähle für die Nachricht genau ein Tool oder keins. Antworte NUR mit JSON: {"tool":"<name>|null","params":{...}}.\n` +
     `Tools:\n${list}\nDienste: ${knownServices.join(", ")}.\n` +
@@ -168,9 +174,52 @@ export async function pickToolWithLlm(local: Provider, model: string, text: stri
     if (!m) return null;
     const parsed = pickSchema.safeParse(JSON.parse(m[0]));
     if (!parsed.success || !parsed.data.tool) return null;
-    if (!TOOLS.some((t) => t.name === parsed.data.tool)) return null;
+    if (NOT_PICKABLE.has(parsed.data.tool) || !TOOLS.some((t) => t.name === parsed.data.tool)) return null;
     return { tool: parsed.data.tool, params: parsed.data.params ?? {} };
   } catch {
     return null;
   }
+}
+
+const targetSchema = z.object({ targetDir: z.string().nullable(), create: z.boolean().optional(), question: z.string().optional() });
+
+export type TargetPick = { targetDir: string; create: boolean } | { question: string };
+
+/**
+ * Zielordner für hochgeladene Dateien aus Luis' Nachricht und der echten Nextcloud-Ordnerliste. Das Modell schlägt nur vor –
+ * `validateTarget` lässt ausschließlich vorhandene Ordner oder einen neuen Unterordner eines vorhandenen zu.
+ * Kein klares Ziel → Rückfrage. Verschoben wird ohnehin erst nach dem Button.
+ */
+export async function pickTargetWithLlm(
+  providers: { provider: Provider; model: string }[],
+  text: string,
+  files: Attachment[],
+  dirs: string[],
+): Promise<TargetPick> {
+  const system =
+    `Du legst Dateien, die Luis hochgeladen hat, in seiner Nextcloud ab. Antworte NUR mit JSON: ` +
+    `{"targetDir":"<Ordnerpfad>|null","create":false,"question":"<kurze Rückfrage, falls unklar>"}.\n` +
+    `Wähle möglichst einen vorhandenen Ordner aus der Liste (Pfad genau so schreiben). Einen neuen Ordner (create:true) nur, ` +
+    `wenn Luis ihn nennt und es ihn nicht gibt; er muss direkt in einem vorhandenen Ordner oder im Hauptordner liegen. ` +
+    `Sagt die Nachricht nicht, wohin die Dateien sollen, oder passt nichts: targetDir null und eine Rückfrage auf Deutsch.`;
+  const prompt =
+    `Nachricht: ${text.slice(0, 1000) || "(keine)"}\n` +
+    `Dateien: ${files.map((f) => f.name).join(", ")}\n` +
+    `Vorhandene Ordner:\n${dirs.map((d) => `- ${d}`).join("\n")}`;
+  for (const { provider, model } of providers) {
+    if (!provider.available()) continue;
+    try {
+      const res = await provider.complete({ prompt, system, model, json: true, timeoutMs: 90_000 });
+      const m = res.text.match(/\{[\s\S]*\}/);
+      const parsed = m ? targetSchema.safeParse(JSON.parse(m[0])) : null;
+      if (!parsed?.success) continue;
+      const { targetDir, create, question } = parsed.data;
+      const valid = targetDir ? validateTarget(targetDir, create ?? false, dirs) : null;
+      if (valid) return valid;
+      return { question: question?.trim() || (targetDir ? `Den Ordner „${targetDir}“ finde ich nicht. Wohin genau?` : "Wohin sollen die Dateien?") };
+    } catch {
+      // nächster Anbieter (z. B. Claude-Kontingent leer → lokal)
+    }
+  }
+  return { question: "Ich konnte gerade keinen Ordner bestimmen. Schreib den Pfad, z. B. „nach Uni/Mathe“." };
 }

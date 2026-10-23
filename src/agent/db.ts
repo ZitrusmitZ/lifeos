@@ -116,6 +116,21 @@ const MIGRATIONS: string[] = [
   CREATE INDEX web_messages_session ON web_messages (session_id, id);
   CREATE INDEX web_sessions_updated ON web_sessions (updated_at);
   `,
+  `
+  -- Anhänge an Nachrichten von Luis (JSON [{path,name,size}], Dateien liegen in Nextcloud)
+  ALTER TABLE web_messages ADD COLUMN attachments TEXT;
+  -- hochgeladene Dateien ohne Ziel (Telegram-Datei ohne Text, Web-Upload ohne Text); nächste Nachricht nimmt sie mit
+  CREATE TABLE pending_uploads (
+    id         INTEGER PRIMARY KEY,
+    chat_id    INTEGER NOT NULL,
+    path       TEXT NOT NULL,               -- in Nextcloud, unter „00 Eingang/Agent“
+    name       TEXT NOT NULL,
+    size       INTEGER NOT NULL,
+    asked      INTEGER NOT NULL DEFAULT 0,  -- 1 = schon einmal nachgefragt
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX pending_uploads_chat ON pending_uploads (chat_id, created_at);
+  `,
 ];
 
 export type AgentDB = DatabaseSync;

@@ -1,12 +1,13 @@
 "use client";
 
-import { ArrowUp, History, MessageCircle, SquarePen } from "lucide-react";
+import { ArrowUp, FileText, History, MessageCircle, Paperclip, SquarePen, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Sheet } from "@/components/ios/sheet";
 import { Button } from "@/components/ui/button";
-import { parseAgentHtml, type AgentMessage, type AgentNode, type AgentSession, type AgentStatus } from "@/lib/agent-html";
+import { parseAgentHtml, type AgentAttachment, type AgentMessage, type AgentNode, type AgentSession, type AgentStatus } from "@/lib/agent-html";
+import { formatBytes } from "@/lib/files/types";
 import { haptic } from "@/lib/haptics";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +19,34 @@ import { cn } from "@/lib/utils";
 const FAST_MS = 1500;
 const SLOW_MS = 20_000;
 const SEEN_KEY = "lifeos-agent-seen";
+const MAX_FILES = 10;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+/** Anhang im Eingabefeld: lädt hoch → liegt im Agenten-Eingang (`file`) oder ist fehlgeschlagen (`error`). */
+type Draft = { key: string; name: string; size: number; progress: number; file?: AgentAttachment; error?: string };
+
+/** Eine Datei mit Fortschritt hochladen (fetch kennt keinen Upload-Fortschritt). */
+function uploadFile(file: File, onProgress: (p: number) => void): Promise<Reply<{ files: AgentAttachment[] }>> {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/agent/uploads");
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      let json: { files?: AgentAttachment[]; error?: string } = {};
+      try {
+        json = JSON.parse(xhr.responseText);
+      } catch {
+        // z. B. 413 vom Proxy ohne JSON
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && json.files) resolve({ ok: true, files: json.files });
+      else resolve({ ok: false, error: json.error ?? `Fehler ${xhr.status}` });
+    };
+    xhr.onerror = () => resolve({ ok: false, error: "Keine Verbindung" });
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
+}
 
 type Reply<T> = ({ ok: true } & T) | { ok: false; error: string };
 
@@ -107,7 +136,18 @@ function Bubble({ m, onAction, pendingAction }: { m: AgentMessage; onAction: (da
           m.id < 0 && "opacity-60",
         )}
       >
-        {renderNodes(parseAgentHtml(m.html))}
+        {m.html ? renderNodes(parseAgentHtml(m.html)) : null}
+        {m.attachments?.length ? (
+          <ul className={cn("flex flex-col gap-1", m.html && "mt-1.5")}>
+            {m.attachments.map((a) => (
+              <li key={a.path} className="flex items-center gap-1.5 text-subhead">
+                <FileText className="size-4 shrink-0" aria-hidden />
+                <span className="min-w-0 truncate">{a.name}</span>
+                <span className="shrink-0 tabular-nums opacity-75">{formatBytes(a.size)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
       {m.buttons?.length ? (
         <div className="flex flex-wrap gap-2">
@@ -157,6 +197,9 @@ export function AgentConversation({
   const [text, setText] = useState("");
   const [waiting, setWaiting] = useState(false);
   const [actionPending, setActionPending] = useState(false);
+  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const since = useRef(0);
   const endRef = useRef<HTMLDivElement>(null);
   const fastUntil = useRef(0);
@@ -220,19 +263,51 @@ export function AgentConversation({
     void pollRef.current();
   };
 
+  const addFiles = (list: FileList | File[]) => {
+    const files = [...list].slice(0, Math.max(0, MAX_FILES - drafts.length));
+    if (!files.length) return;
+    haptic();
+    for (const f of files) {
+      const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const update = (patch: Partial<Draft>) => setDrafts((prev) => prev.map((d) => (d.key === key ? { ...d, ...patch } : d)));
+      if (f.size > MAX_FILE_BYTES) {
+        setDrafts((prev) => [...prev, { key, name: f.name, size: f.size, progress: 0, error: "über 10 MB" }]);
+        continue;
+      }
+      setDrafts((prev) => [...prev, { key, name: f.name, size: f.size, progress: 0 }]);
+      void uploadFile(f, (progress) => update({ progress })).then((res) =>
+        update(res.ok && res.files[0] ? { progress: 1, file: res.files[0] } : { error: res.ok ? "Upload fehlgeschlagen" : res.error }),
+      );
+    }
+  };
+
+  const uploading = drafts.some((d) => !d.file && !d.error);
+  const ready = drafts.flatMap((d) => (d.file ? [d.file] : []));
+
   const send = async () => {
     const t = text.trim();
-    if (!t || waiting) return;
+    if ((!t && !ready.length) || waiting || uploading) return;
     haptic();
+    const keptDrafts = drafts;
     setText("");
+    setDrafts([]);
     setWaiting(true);
-    const temp: AgentMessage = { id: -Date.now(), role: "user", html: escapeText(t), buttons: null, createdAt: Date.now(), updatedAt: Date.now() };
+    const temp: AgentMessage = {
+      id: -Date.now(),
+      role: "user",
+      html: escapeText(t),
+      buttons: null,
+      attachments: ready,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
     setMessages((prev) => [...prev, temp]);
-    const res = await call<{ id: number }>("POST", `/api/agent/sessions/${sessionId}`, { text: t });
+    const res = await call<{ id: number }>("POST", `/api/agent/sessions/${sessionId}`, { text: t, attachments: ready });
     if (!res.ok) {
       setError(res.error);
       setWaiting(false);
       setText(t);
+      setDrafts(keptDrafts);
       setMessages((prev) => prev.filter((m) => m.id !== temp.id));
       return;
     }
@@ -251,11 +326,28 @@ export function AgentConversation({
   const thinking = busy || waiting;
 
   return (
-    <div className="flex min-h-full flex-col">
+    <div
+      className={cn("flex min-h-full flex-col", dragging && "rounded-2xl ring-2 ring-tint ring-offset-2 ring-offset-background")}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return;
+        e.preventDefault();
+        setDragging(false);
+        addFiles(e.dataTransfer.files);
+      }}
+    >
       <ol className="flex flex-1 flex-col gap-3 py-2" aria-live="polite">
         {loaded && !messages.length ? (
           <li className="py-10 text-center text-subhead text-muted-foreground">
-            Frag etwas oder schreib „Status“, „Starte Minecraft neu“, „Erinner mich jeden Freitag um 16 Uhr an …“ oder /help.
+            Frag etwas oder schreib „Status“, „Starte Minecraft neu“, „Erinner mich jeden Freitag um 16 Uhr an …“ oder /help. Dateien
+            hierher ziehen und sagen, in welchen Ordner sie sollen.
           </li>
         ) : null}
         {messages.map((m) => (
@@ -278,7 +370,56 @@ export function AgentConversation({
         className={cn("sticky bottom-0 z-10 -mx-1 flex flex-col gap-1.5 bg-background px-1 pt-2 pb-1", composerClassName)}
       >
         <StatusLine status={status} error={error} />
+        {drafts.length ? (
+          <ul className="flex flex-wrap gap-1.5" aria-label="Anhänge">
+            {drafts.map((d) => (
+              <li
+                key={d.key}
+                className={cn(
+                  "relative flex max-w-full items-center gap-1.5 overflow-hidden rounded-full border border-border bg-muted py-1 pr-1 pl-3 text-footnote",
+                  d.error && "border-destructive/50 text-destructive",
+                )}
+              >
+                {!d.file && !d.error ? (
+                  <span className="absolute inset-y-0 left-0 bg-tint/15 transition-[width]" style={{ width: `${Math.round(d.progress * 100)}%` }} aria-hidden />
+                ) : null}
+                <FileText className="relative size-3.5 shrink-0" aria-hidden />
+                <span className="relative max-w-48 min-w-0 truncate">{d.name}</span>
+                <span className="relative shrink-0 text-muted-foreground tabular-nums">{d.error ?? (d.file ? formatBytes(d.size) : `${Math.round(d.progress * 100)} %`)}</span>
+                <button
+                  type="button"
+                  onClick={() => setDrafts((prev) => prev.filter((x) => x.key !== d.key))}
+                  className="relative grid size-6 shrink-0 place-items-center rounded-full hover:bg-foreground/10"
+                  aria-label={`${d.name} entfernen`}
+                >
+                  <X className="size-3.5" aria-hidden />
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className="flex items-end gap-2">
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              if (e.target.files) addFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label="Datei anhängen"
+            disabled={drafts.length >= MAX_FILES}
+            onClick={() => fileInput.current?.click()}
+            className="shrink-0 text-muted-foreground"
+          >
+            <Paperclip className="size-5" aria-hidden />
+          </Button>
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -291,11 +432,11 @@ export function AgentConversation({
             rows={1}
             maxLength={4000}
             autoFocus={autoFocus}
-            placeholder="Nachricht an den Agenten"
+            placeholder={drafts.length ? "Wohin damit? z. B. „nach Uni/Mathe“" : "Nachricht an den Agenten"}
             aria-label="Nachricht an den Agenten"
             className="field-sizing-content max-h-40 min-h-11 flex-1 resize-none rounded-[22px] border border-border bg-background px-4 py-2.5 text-body outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
-          <Button type="submit" size="icon" aria-label="Senden" disabled={!text.trim() || waiting} className="bg-tint text-white hover:bg-tint/85">
+          <Button type="submit" size="icon" aria-label="Senden" disabled={(!text.trim() && !ready.length) || waiting || uploading} className="bg-tint text-white hover:bg-tint/85">
             <ArrowUp className="size-5" aria-hidden />
           </Button>
         </div>

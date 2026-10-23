@@ -3,10 +3,28 @@ import { htmlToPlain, splitMessage } from "./format.ts";
 /** Minimaler Client für die Telegram Bot API (Long Polling, kein Webhook → keine Portfreigabe nötig). */
 
 export type TgUser = { id: number; is_bot?: boolean; username?: string; first_name?: string };
-export type TgMessage = { message_id: number; from?: TgUser; chat: { id: number; type: string }; date: number; text?: string };
+export type TgDocument = { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
+export type TgPhotoSize = { file_id: string; width: number; height: number; file_size?: number };
+export type TgMessage = {
+  message_id: number;
+  from?: TgUser;
+  chat: { id: number; type: string };
+  date: number;
+  text?: string;
+  caption?: string;
+  document?: TgDocument;
+  photo?: TgPhotoSize[];
+  /** gleiche ID = gemeinsam verschicktes Album (je Datei ein Update) */
+  media_group_id?: string;
+};
 export type TgCallbackQuery = { id: string; from: TgUser; message?: TgMessage; data?: string };
 export type TgUpdate = { update_id: number; message?: TgMessage; edited_message?: TgMessage; callback_query?: TgCallbackQuery };
 export type InlineButton = { text: string; callback_data: string };
+
+/** Dateien aus Telegram laden (Bot-API: höchstens 20 MB). */
+export interface TgFiles {
+  download(fileId: string): Promise<Uint8Array>;
+}
 
 /** Was Gateway, Scheduler und Bestätigungs-Flow brauchen – in Tests durch ein Fake ersetzt. */
 export interface Messenger {
@@ -17,11 +35,13 @@ export interface Messenger {
   typing(chatId: number): Promise<void>;
 }
 
-export class TelegramApi implements Messenger {
+export class TelegramApi implements Messenger, TgFiles {
   private readonly base: string;
+  private readonly fileBase: string;
 
   constructor(token: string) {
     this.base = `https://api.telegram.org/bot${token}`;
+    this.fileBase = `https://api.telegram.org/file/bot${token}`;
   }
 
   async call<T>(method: string, body: Record<string, unknown>, timeoutMs = 15_000): Promise<T> {
@@ -77,6 +97,15 @@ export class TelegramApi implements Messenger {
 
   async typing(chatId: number): Promise<void> {
     await this.call("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => undefined);
+  }
+
+  async download(fileId: string): Promise<Uint8Array> {
+    const file = await this.call<{ file_path?: string }>("getFile", { file_id: fileId });
+    if (!file.file_path) throw new Error("Telegram liefert die Datei nicht (über 20 MB?)");
+    const res = await fetch(`${this.fileBase}/${file.file_path}`, { signal: AbortSignal.timeout(2 * 60_000) });
+    // Fehlermeldung ohne URL – die enthält das Bot-Token
+    if (!res.ok) throw new Error(`Download von Telegram fehlgeschlagen (${res.status})`);
+    return new Uint8Array(await res.arrayBuffer());
   }
 
   async setCommands(commands: { command: string; description: string }[]): Promise<void> {
