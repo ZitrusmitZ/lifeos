@@ -42,3 +42,18 @@ export async function DELETE(_request: Request, ctx: RouteContext<"/api/agent/se
   if (!id) return notFound();
   return agentResponse(await agentRequest("DELETE", `/sessions/${id}`));
 }
+
+const patchSchema = z
+  .object({ title: z.string().max(200).nullable().optional(), pinned: z.boolean().optional(), archived: z.boolean().optional() })
+  .strict()
+  .refine((p) => Object.keys(p).length > 0);
+
+/** Umbenennen, anheften, archivieren/wiederherstellen. */
+export async function PATCH(request: Request, ctx: RouteContext<"/api/agent/sessions/[id]">) {
+  await connection();
+  const id = await idOf(ctx);
+  if (!id) return notFound();
+  const parsed = patchSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return Response.json({ error: "Ungültige Änderung" }, { status: 400 });
+  return agentResponse(await agentRequest("PATCH", `/sessions/${id}`, parsed.data));
+}

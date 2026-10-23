@@ -47,6 +47,8 @@ function seed(): Store {
     createdAt: list[0].createdAt,
     updatedAt: list[list.length - 1].updatedAt,
     count: list.length,
+    pinned: false,
+    archived: false,
   });
   const lists: [number, string, AgentMessage[]][] = [
     [1, "Status und Minecraft", first],
@@ -63,7 +65,7 @@ function seed(): Store {
 
 const store = () => (g.__agentDemo ??= seed());
 
-export function demoAgentRequest(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): AgentReply {
+export function demoAgentRequest(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): AgentReply {
   const st = store();
   const url = new URL(path, "http://agent");
   const parts = url.pathname.split("/").filter(Boolean);
@@ -73,15 +75,16 @@ export function demoAgentRequest(method: "GET" | "POST" | "DELETE", path: string
   if (parts.length === 1) {
     if (method === "POST") {
       const id = st.nextSession++;
-      st.sessions.set(id, { id, title: null, createdAt: Date.now(), updatedAt: Date.now(), count: 0 });
+      st.sessions.set(id, { id, title: null, createdAt: Date.now(), updatedAt: Date.now(), count: 0, pinned: false, archived: false });
       st.messages.set(id, []);
       return { status: 200, json: { id } };
     }
     const q = url.searchParams.get("q")?.toLowerCase();
     const before = Number(url.searchParams.get("before") ?? 0);
+    const view = url.searchParams.get("view");
     const sessions = [...st.sessions.values()]
-      .filter((s) => (!q || (s.title ?? "").toLowerCase().includes(q) || st.messages.get(s.id)!.some((m) => m.html.toLowerCase().includes(q))) && (!before || s.updatedAt < before))
-      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .filter((s) => (view === "archived" ? s.archived : !s.archived && (view !== "pinned" || s.pinned)) && (!q || (s.title ?? "").toLowerCase().includes(q) || st.messages.get(s.id)!.some((m) => m.html.toLowerCase().includes(q))) && (!before || s.updatedAt < before))
+      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt)
       .slice(0, 30);
     return { status: 200, json: { sessions, status: STATUS } };
   }
@@ -95,6 +98,20 @@ export function demoAgentRequest(method: "GET" | "POST" | "DELETE", path: string
     st.messages.delete(id);
     return { status: 200, json: { ok: true } };
   }
+  if (method === "PATCH") {
+    const p = (body ?? {}) as { title?: string | null; pinned?: boolean; archived?: boolean };
+    if (p.title !== undefined) session.title = p.title?.trim() || null;
+    if (p.archived !== undefined) {
+      session.archived = p.archived;
+      if (p.archived) session.pinned = false;
+    }
+    if (p.pinned !== undefined && !session.archived) session.pinned = p.pinned;
+    return { status: 200, json: { session } };
+  }
+  if (parts[2] === "export") {
+    const md = list.map((m) => `## ${m.role === "user" ? "Luis" : "Agent"}\n\n${m.html.replace(/<[^>]+>/g, "")}\n`).join("\n");
+    return { status: 200, json: { filename: `unterhaltung-${id}.md`, markdown: `# ${session.title ?? "Neue Unterhaltung"}\n\n${md}` } };
+  }
   if (method === "POST") {
     const { text, attachments } = (body ?? {}) as { text?: string; attachments?: AgentMessage["attachments"] };
     const now = Date.now();
@@ -107,5 +124,5 @@ export function demoAgentRequest(method: "GET" | "POST" | "DELETE", path: string
     return { status: 200, json: { id: list[list.length - 2].id } };
   }
   const since = Number(url.searchParams.get("since") ?? 0);
-  return { status: 200, json: { messages: list.filter((m) => m.updatedAt > since), busy: false, status: STATUS } };
+  return { status: 200, json: { session, messages: list.filter((m) => m.updatedAt > since), busy: false, status: STATUS } };
 }
