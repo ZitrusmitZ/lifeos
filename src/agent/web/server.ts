@@ -6,6 +6,7 @@ import type { AgentDB } from "../db.ts";
 import type { Gateway } from "../gateway.ts";
 import { log } from "../log.ts";
 import { escapeHtml } from "../telegram/format.ts";
+import { attachmentsSchema } from "../uploads.ts";
 import type { WebMessenger } from "./messenger.ts";
 import { addMessage, createSession, deleteSession, getSession, listMessages, listSessions } from "./store.ts";
 
@@ -17,7 +18,8 @@ import { addMessage, createSession, deleteSession, getSession, listMessages, lis
  *   GET    /sessions?before=&q=          Unterhaltungen (neueste zuerst)
  *   POST   /sessions                     neue Unterhaltung
  *   GET    /sessions/:id/messages?since= Nachrichten (neu oder geändert seit `since`) + Status
- *   POST   /sessions/:id/messages        {text} → 202, Antwort kommt asynchron
+ *   POST   /sessions/:id/messages        {text, attachments?} → 202, Antwort kommt asynchron
+ *                                        (Anhänge: nur Pfade – die Dateien hat LifeOS schon in Nextcloud abgelegt)
  *   DELETE /sessions/:id
  *   POST   /actions                      {data} Button-Klick
  */
@@ -36,7 +38,9 @@ export type WebServerDeps = {
   now?: () => number;
 };
 
-const textSchema = z.object({ text: z.string().trim().min(1).max(MAX_TEXT) });
+const messageSchema = z
+  .object({ text: z.string().trim().max(MAX_TEXT), attachments: attachmentsSchema.default([]) })
+  .refine((m) => m.text.length > 0 || m.attachments.length > 0);
 const actionSchema = z.object({ data: z.string().regex(/^[cja]:[0-9a-f]{12}:[yn]$/) });
 
 const digest = (s: string) => createHash("sha256").update(s).digest();
@@ -109,13 +113,13 @@ export function createWebHandler(deps: WebServerDeps) {
           };
         }
         if (method === "POST") {
-          const parsed = textSchema.safeParse(await readJson(req));
-          if (!parsed.success) throw new HttpError(400, `Text fehlt oder ist länger als ${MAX_TEXT} Zeichen`);
-          const text = parsed.data.text;
-          const id = addMessage(deps.db, session.id, { role: "user", html: escapeHtml(text) }, now());
+          const parsed = messageSchema.safeParse(await readJson(req));
+          if (!parsed.success) throw new HttpError(400, `Text fehlt oder ist länger als ${MAX_TEXT} Zeichen (bzw. ungültige Anhänge)`);
+          const { text, attachments } = parsed.data;
+          const id = addMessage(deps.db, session.id, { role: "user", html: escapeHtml(text), attachments }, now());
           // Antwort kann dauern (Claude bis zu Minuten) – das Dashboard pollt
           void deps.web
-            .track(session.id, () => deps.gateway.handleWebText(session.id, text))
+            .track(session.id, () => deps.gateway.handleWebText(session.id, text, attachments))
             .catch((err) => log.error("web", (err as Error).message));
           return { status: 202, body: { id } };
         }

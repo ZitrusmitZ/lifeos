@@ -11,11 +11,13 @@ import { lastDecision, msgHash, type Router } from "./router.ts";
 import { describeCron, isValidCron, nextRun } from "./scheduler/cron.ts";
 import { parseExplicitJob, parseScheduleRules, parseScheduleWithLlm, type ParsedSchedule } from "./scheduler/parse.ts";
 import { createJob, deleteJob, getJob, listJobs, updateJob } from "./scheduler/scheduler.ts";
-import type { Messenger, TgCallbackQuery, TgUpdate } from "./telegram/api.ts";
+import type { Messenger, TgCallbackQuery, TgFiles, TgMessage, TgUpdate } from "./telegram/api.ts";
 import { escapeHtml, markdownToHtml } from "./telegram/format.ts";
 import { calendarContext, CALENDAR_MAX_DAYS, loadCalendar } from "./tools/calendar.ts";
-import { looksLikeSchedule, matchToolIntent, mentionsApps, mentionsCalendar, pickToolWithLlm } from "./tools/intents.ts";
+import { loadDirs, uploadToInbox } from "./tools/homeserver.ts";
+import { looksLikeSchedule, matchToolIntent, mentionsApps, mentionsCalendar, pickTargetWithLlm, pickToolWithLlm } from "./tools/intents.ts";
 import { formatSystemStatus, readSystemStatus } from "./tools/system.ts";
+import { addPending, fileList, hasPending, MAX_UPLOAD_BYTES, mergeAttachments, takePending, UPLOAD_ROOT, type Attachment } from "./uploads.ts";
 import { webChatId } from "./web/messenger.ts";
 import { formatTime, relativeTime, today } from "../lib/time.ts";
 
@@ -89,7 +91,24 @@ export type GatewayDeps = {
   now?: () => number;
   /** für Tests (Kalender über LifeOS) */
   fetch?: typeof fetch;
+  /** Dateien aus Telegram laden (ohne: Telegram-Dateien werden abgelehnt) */
+  files?: TgFiles;
+  /** so lange nach der letzten Telegram-Datei auf weitere warten (Alben kommen als einzelne Updates) */
+  fileDebounceMs?: number;
 };
+
+/** Gesammelte Telegram-Dateien eines Chats, bis keine mehr nachkommt. */
+type FileBatch = { caption: string; inflight: number; timer?: ReturnType<typeof setTimeout> };
+
+/** `2026-10-22-101500` in Luis' Zeitzone – Dateiname für Telegram-Fotos. */
+function fileStamp(ms: number, tz: string): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+      .formatToParts(new Date(ms))
+      .map((x) => [x.type, x.value]),
+  );
+  return `${p.year}-${p.month}-${p.day}-${p.hour}${p.minute}${p.second}`;
+}
 
 /** Nachrichten, die älter sind (z. B. nach längerem Ausfall), werden nicht mehr ausgeführt. */
 const MAX_MESSAGE_AGE_SEC = 10 * 60;
@@ -97,6 +116,7 @@ const MAX_MESSAGE_AGE_SEC = 10 * 60;
 export class Gateway {
   private readonly d: GatewayDeps;
   private readonly limiter: RateLimiter;
+  private readonly fileBatches = new Map<number, FileBatch>();
 
   constructor(deps: GatewayDeps) {
     this.d = deps;
@@ -124,20 +144,22 @@ export class Gateway {
       log.warn("gateway", `ignoriert: user=${msg.from?.id ?? "?"} chat=${msg.chat.id} type=${msg.chat.type}`);
       return;
     }
-    if (!msg.text) return;
+    const hasFile = Boolean(msg.document || msg.photo?.length);
+    if (!msg.text && !hasFile) return;
     if (this.now() / 1000 - msg.date > MAX_MESSAGE_AGE_SEC) {
       await this.d.tg.send(msg.chat.id, "⏱ Nachricht war zu alt (Bot war offline) – bitte nochmal schicken.");
       return;
     }
-    await this.process(msg.chat.id, msg.text);
+    if (hasFile) return this.onTelegramFile(msg);
+    await this.process(msg.chat.id, msg.text ?? "");
   }
 
   /**
    * Web-Chat im Dashboard (Unterhaltung `sessionId`). Keine Whitelist: Zugriff regeln Unix-Socket + Token
    * auf Agent-Seite und Tailscale-Identität im Dashboard.
    */
-  async handleWebText(sessionId: number, text: string): Promise<void> {
-    await this.process(webChatId(sessionId), text);
+  async handleWebText(sessionId: number, text: string, attachments: Attachment[] = []): Promise<void> {
+    await this.process(webChatId(sessionId), text, attachments);
   }
 
   /** Button-Klick aus dem Dashboard (`c:<id>:y|n` bzw. `j:<id>:y|n`, gleiche Daten wie bei Telegram). */
@@ -147,7 +169,11 @@ export class Gateway {
     if (data.startsWith("a:")) return this.d.approvals?.onCallback(data, "");
   }
 
-  private async process(chatId: number, text: string): Promise<void> {
+  /**
+   * `attachments`: gerade hochgeladene Dateien (liegen schon im Agenten-Eingang). Gibt es welche – oder offene von vorher
+   * und eine Textnachricht – geht die Nachricht an die Ablage statt an Regeln und Modell. `files`: Telegram-Stapel ohne Text.
+   */
+  private async process(chatId: number, text: string, attachments: Attachment[] = [], files = false): Promise<void> {
     const rl = this.limiter.check(this.now());
     if (rl === "drop") return;
     if (rl === "warn") {
@@ -155,10 +181,111 @@ export class Gateway {
       return;
     }
     try {
-      await this.onText(chatId, text.trim());
+      const t = text.trim();
+      if (files || attachments.length || (t && !t.startsWith("/") && hasPending(this.d.db, chatId, this.now()))) {
+        await this.onFiles(chatId, t, attachments);
+      } else await this.onText(chatId, t);
     } catch (err) {
       log.error("gateway", (err as Error).stack ?? (err as Error).message);
       await this.d.tg.send(chatId, `⚠️ Fehler: ${escapeHtml((err as Error).message)}`).catch(() => undefined);
+    }
+  }
+
+  private get lifeos() {
+    return { cfg: this.d.cfg, fetch: this.d.fetch };
+  }
+
+  /** Telegram-Datei sofort in den Agenten-Eingang hochladen, dann kurz auf weitere Dateien (Album) warten. */
+  private async onTelegramFile(msg: TgMessage): Promise<void> {
+    const chatId = msg.chat.id;
+    const doc = msg.document;
+    const photo = msg.photo?.at(-1); // größte Auflösung
+    const fileId = doc?.file_id ?? photo?.file_id;
+    if (!fileId) return;
+    if (!this.d.files) {
+      await this.d.tg.send(chatId, "⚠️ Dateien kann ich hier gerade nicht annehmen.");
+      return;
+    }
+    const size = doc?.file_size ?? photo?.file_size ?? 0;
+    const name = doc?.file_name?.trim() || (doc ? "datei" : `foto-${fileStamp(msg.date * 1000, this.tz)}.jpg`);
+    if (size > MAX_UPLOAD_BYTES) {
+      await this.d.tg.send(chatId, `⚠️ „${escapeHtml(name)}“ ist zu groß (max. ${MAX_UPLOAD_BYTES / 1024 / 1024} MB).`);
+      return;
+    }
+    const batch = this.fileBatches.get(chatId) ?? { caption: "", inflight: 0 };
+    this.fileBatches.set(chatId, batch);
+    if (msg.caption?.trim()) batch.caption = msg.caption.trim();
+    clearTimeout(batch.timer);
+    batch.inflight++;
+    try {
+      const data = await this.d.files.download(fileId);
+      const file = await uploadToInbox(this.lifeos, name, data, doc?.mime_type ?? (photo ? "image/jpeg" : undefined));
+      addPending(this.d.db, chatId, [file], this.now());
+    } catch (err) {
+      await this.d.tg.send(chatId, `⚠️ „${escapeHtml(name)}“: ${escapeHtml((err as Error).message)}`);
+    } finally {
+      batch.inflight--;
+    }
+    if (batch.inflight === 0) {
+      batch.timer = setTimeout(() => void this.flushFiles(chatId).catch((err) => log.error("gateway", (err as Error).message)), this.d.fileDebounceMs ?? 1500);
+    }
+  }
+
+  /** Gesammelte Telegram-Dateien verarbeiten (Bildunterschrift = Anweisung). Öffentlich für Tests. */
+  async flushFiles(chatId: number): Promise<void> {
+    const batch = this.fileBatches.get(chatId);
+    if (!batch || batch.inflight > 0) return;
+    clearTimeout(batch.timer);
+    this.fileBatches.delete(chatId);
+    if (!hasPending(this.d.db, chatId, this.now())) return;
+    await this.process(chatId, batch.caption, [], true);
+  }
+
+  /** Ablage: Zielordner aus der Nachricht bestimmen und das Verschieben per Button bestätigen lassen. */
+  private async onFiles(chatId: number, text: string, attachments: Attachment[]): Promise<void> {
+    const pending = takePending(this.d.db, chatId, this.now());
+    const files = mergeAttachments(pending.files, attachments);
+    if (!files.length) return this.onText(chatId, text);
+    const inbox = `<code>/${escapeHtml(UPLOAD_ROOT)}</code>`;
+    if (!text) {
+      addPending(this.d.db, chatId, files, this.now());
+      await this.d.tg.send(chatId, `📎 ${fileList(files)} liegt im Eingang (${inbox}). Wohin damit?`);
+      return;
+    }
+    const stopTyping = this.keepTyping(chatId);
+    try {
+      let dirs: string[];
+      try {
+        dirs = await loadDirs(this.lifeos);
+      } catch (err) {
+        addPending(this.d.db, chatId, files, this.now(), pending.asked);
+        await this.d.tg.send(chatId, `⚠️ Nextcloud-Ordner nicht lesbar: ${escapeHtml((err as Error).message)}`);
+        return;
+      }
+      const pick = await pickTargetWithLlm(
+        [
+          { provider: this.d.claude, model: this.d.cfg.CLAUDE_MODEL_SIMPLE },
+          { provider: this.d.local, model: this.d.cfg.OLLAMA_MODEL },
+        ],
+        text,
+        files,
+        dirs,
+      );
+      if ("question" in pick) {
+        // einmal nachfragen; passt auch die nächste Nachricht nicht, war sie wohl nicht als Ablage gemeint
+        if (attachments.length || !pending.asked) {
+          addPending(this.d.db, chatId, files, this.now(), true);
+          await this.d.tg.send(chatId, `📎 ${escapeHtml(pick.question)}`);
+          return;
+        }
+        await this.d.tg.send(chatId, `📎 ${fileList(files)} bleibt im Eingang (${inbox}).`);
+        stopTyping();
+        return await this.onText(chatId, text);
+      }
+      this.logRule(text, `Anhänge → nextcloud_move ${pick.targetDir}`);
+      await this.d.confirm.request(chatId, "nextcloud_move", { files, ...pick });
+    } finally {
+      stopTyping();
     }
   }
 

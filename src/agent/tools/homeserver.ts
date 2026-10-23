@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { escapeHtml } from "../telegram/format.ts";
+import { attachmentSchema, fileList, MAX_ATTACHMENTS, normalizeDir, type Attachment } from "../uploads.ts";
 import type { Tool, ToolCtx } from "./registry.ts";
 
 /**
@@ -26,20 +27,23 @@ export type HomeserverStatus = {
   }>;
 };
 
-const endpoint = (ctx: ToolCtx) => `${ctx.cfg.LIFEOS_URL.replace(/\/$/, "")}/api/jobs/homeserver`;
+/** Was die LifeOS-Aufrufe brauchen – auch das Gateway nutzt sie (Ordnerliste, Telegram-Upload). */
+export type LifeosCtx = Pick<ToolCtx, "cfg" | "fetch">;
 
-function token(ctx: ToolCtx): string {
+const endpoint = (ctx: LifeosCtx, sub = "") => `${ctx.cfg.LIFEOS_URL.replace(/\/$/, "")}/api/jobs/homeserver${sub}`;
+
+function token(ctx: LifeosCtx): string {
   if (!ctx.cfg.LIFEOS_CRON_TOKEN) throw new Error("LIFEOS_CRON_TOKEN fehlt in agent.env");
   return ctx.cfg.LIFEOS_CRON_TOKEN;
 }
 
-async function call<T>(ctx: ToolCtx, init: RequestInit = {}, timeoutMs = 20_000): Promise<T> {
+async function call<T>(ctx: LifeosCtx, init: RequestInit = {}, timeoutMs = 20_000, sub = ""): Promise<T> {
   const doFetch = ctx.fetch ?? fetch;
   const headers = new Headers(init.headers);
   headers.set("Authorization", `Bearer ${token(ctx)}`);
   let res: Response;
   try {
-    res = await doFetch(endpoint(ctx), { ...init, headers, signal: AbortSignal.timeout(timeoutMs) });
+    res = await doFetch(endpoint(ctx, sub), { ...init, headers, signal: AbortSignal.timeout(timeoutMs) });
   } catch {
     throw new Error("LifeOS nicht erreichbar");
   }
@@ -51,13 +55,26 @@ async function call<T>(ctx: ToolCtx, init: RequestInit = {}, timeoutMs = 20_000)
 
 export const loadHomeserver = (ctx: ToolCtx) => call<HomeserverStatus>(ctx);
 
+const postJson = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+/** Nextcloud-Ordner (relativ zum Nutzerordner, ohne führenden Schrägstrich) als Auswahl für den Zielordner. */
+export async function loadDirs(ctx: LifeosCtx): Promise<string[]> {
+  const res = await call<{ ok: boolean; dirs?: string[] }>(ctx, postJson({ action: "nextcloud.dirs" }), 30_000);
+  return res.dirs ?? [];
+}
+
+/** Datei (z. B. aus Telegram) in den Agenten-Eingang in Nextcloud hochladen. */
+export async function uploadToInbox(ctx: LifeosCtx, name: string, data: Uint8Array, contentType = "application/octet-stream"): Promise<Attachment> {
+  const form = new FormData();
+  form.append("file", new Blob([data as BlobPart], { type: contentType }), name);
+  const res = await call<{ ok: boolean; file?: Attachment }>(ctx, { method: "POST", body: form }, 3 * 60_000, "/upload");
+  if (!res.file) throw new Error("Upload ohne Antwort");
+  return res.file;
+}
+
 async function act(ctx: ToolCtx, action: Record<string, unknown>, timeoutMs?: number): Promise<string> {
   if (ctx.dryRun) return `🧪 Dry-Run – nicht ausgeführt: <code>${escapeHtml(JSON.stringify(action))}</code>`;
-  const res = await call<{ ok: boolean; message?: string }>(
-    ctx,
-    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) },
-    timeoutMs,
-  );
+  const res = await call<{ ok: boolean; message?: string }>(ctx, postJson(action), timeoutMs);
   return `✅ ${escapeHtml(res.message ?? "Erledigt")}`;
 }
 
@@ -226,6 +243,24 @@ export const HOMESERVER_TOOLS = [
     preview: () => "Pi-hole-Blocklisten neu laden (Gravity-Update, dauert ein paar Minuten)",
     async run(_p, ctx) {
       return act(ctx, { action: "pihole.gravity" }, 10 * 60_000);
+    },
+  }),
+  defineTool({
+    name: "nextcloud_move",
+    kind: "change",
+    description: "Hochgeladene Dateien aus dem Agenten-Eingang in einen Nextcloud-Ordner verschieben (nur mit Anhängen)",
+    params: z.object({
+      files: z.array(attachmentSchema).min(1).max(MAX_ATTACHMENTS),
+      targetDir: z.string().transform((d, c) => {
+        const dir = normalizeDir(d);
+        if (!dir) c.addIssue({ code: "custom", message: "ungültiger Zielordner" });
+        return dir ?? "";
+      }),
+      create: z.boolean().default(false),
+    }),
+    preview: (p) => `📁 ${fileList(p.files)} nach <b>/${escapeHtml(p.targetDir)}</b> verschieben${p.create ? " (neuer Ordner)" : ""}`,
+    async run(p, ctx) {
+      return act(ctx, { action: "nextcloud.move", files: p.files.map((f) => f.path), targetDir: p.targetDir, create: p.create }, 2 * 60_000);
     },
   }),
 ];

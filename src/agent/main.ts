@@ -136,7 +136,7 @@ async function main(): Promise<void> {
     log.warn("coder", `Freigabe-Socket für Coding-Agents nicht gestartet (${cfg.AGENT_CODER_SOCKET}): ${(err as Error).message}`);
     return null;
   });
-  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals });
+  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined });
   if (approvalEndpoint && cfg.AGENT_CONNECTORS) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
   const sampler = new MemSampler();
 

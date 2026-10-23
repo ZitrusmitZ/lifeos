@@ -5,11 +5,14 @@
  */
 
 export type AgentButton = { text: string; callback_data: string };
+/** Datei, die schon im Agenten-Eingang in Nextcloud liegt */
+export type AgentAttachment = { path: string; name: string; size: number };
 export type AgentMessage = {
   id: number;
   role: "user" | "agent";
   html: string;
   buttons: AgentButton[][] | null;
+  attachments?: AgentAttachment[] | null;
   createdAt: number;
   updatedAt: number;
 };

@@ -1,6 +1,7 @@
 import type { AgentDB } from "../db.ts";
 import type { InlineButton } from "../telegram/api.ts";
 import { htmlToPlain } from "../telegram/format.ts";
+import type { Attachment } from "../uploads.ts";
 
 /**
  * Unterhaltungen des Web-Chats im LifeOS-Dashboard (Tabellen `web_sessions`, `web_messages`).
@@ -8,13 +9,21 @@ import { htmlToPlain } from "../telegram/format.ts";
  */
 
 export type WebRole = "user" | "agent";
-export type WebMessage = { id: number; role: WebRole; html: string; buttons: InlineButton[][] | null; createdAt: number; updatedAt: number };
+export type WebMessage = {
+  id: number;
+  role: WebRole;
+  html: string;
+  buttons: InlineButton[][] | null;
+  attachments: Attachment[] | null;
+  createdAt: number;
+  updatedAt: number;
+};
 export type WebSession = { id: number; title: string | null; createdAt: number; updatedAt: number; count: number };
 
 const TITLE_MAX = 60;
 export const SESSION_PAGE = 30;
 
-type MessageRow = { id: number; role: WebRole; html: string; buttons: string | null; created_at: number; updated_at: number };
+type MessageRow = { id: number; role: WebRole; html: string; buttons: string | null; attachments: string | null; created_at: number; updated_at: number };
 type SessionRow = { id: number; title: string | null; created_at: number; updated_at: number; count: number };
 
 const toMessage = (r: MessageRow): WebMessage => ({
@@ -22,6 +31,7 @@ const toMessage = (r: MessageRow): WebMessage => ({
   role: r.role,
   html: r.html,
   buttons: r.buttons ? (JSON.parse(r.buttons) as InlineButton[][]) : null,
+  attachments: r.attachments ? (JSON.parse(r.attachments) as Attachment[]) : null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -76,17 +86,25 @@ export function deleteSession(db: AgentDB, id: number): boolean {
 export function addMessage(
   db: AgentDB,
   sessionId: number,
-  m: { role: WebRole; html: string; buttons?: InlineButton[][] },
+  m: { role: WebRole; html: string; buttons?: InlineButton[][]; attachments?: Attachment[] },
   now = Date.now(),
 ): number {
   const id = Number(
     db
-      .prepare("INSERT INTO web_messages (session_id, role, html, buttons, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(sessionId, m.role, m.html, m.buttons?.length ? JSON.stringify(m.buttons) : null, now, now).lastInsertRowid,
+      .prepare("INSERT INTO web_messages (session_id, role, html, buttons, attachments, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(
+        sessionId,
+        m.role,
+        m.html,
+        m.buttons?.length ? JSON.stringify(m.buttons) : null,
+        m.attachments?.length ? JSON.stringify(m.attachments) : null,
+        now,
+        now,
+      ).lastInsertRowid,
   );
   db.prepare("UPDATE web_sessions SET updated_at = ? WHERE id = ?").run(now, sessionId);
   if (m.role === "user") {
-    const plain = htmlToPlain(m.html).replace(/\s+/g, " ").trim();
+    const plain = htmlToPlain(m.html).replace(/\s+/g, " ").trim() || (m.attachments?.length ? `📎 ${m.attachments.map((a) => a.name).join(", ")}` : "");
     const title = plain.length > TITLE_MAX ? `${plain.slice(0, TITLE_MAX - 1)}…` : plain;
     db.prepare("UPDATE web_sessions SET title = ? WHERE id = ? AND title IS NULL").run(title, sessionId);
   }
@@ -104,7 +122,7 @@ export function editMessage(db: AgentDB, id: number, html: string, now = Date.no
 /** Alle Nachrichten, die seit `since` neu sind oder geändert wurden (≥, das Dashboard führt nach `id` zusammen). */
 export function listMessages(db: AgentDB, sessionId: number, since = 0): WebMessage[] {
   const rows = db
-    .prepare("SELECT id, role, html, buttons, created_at, updated_at FROM web_messages WHERE session_id = ? AND updated_at >= ? ORDER BY id")
+    .prepare("SELECT id, role, html, buttons, attachments, created_at, updated_at FROM web_messages WHERE session_id = ? AND updated_at >= ? ORDER BY id")
     .all(sessionId, since) as MessageRow[];
   return rows.map(toMessage);
 }

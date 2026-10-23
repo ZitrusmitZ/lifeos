@@ -5,7 +5,7 @@ import { resolve, type WidgetResult } from "@/integrations/core";
 import { nextcloud, type NextcloudData } from "@/integrations/nextcloud";
 import { pihole, type PiholeData } from "@/integrations/pihole";
 import { safeEqual } from "@/lib/crypto";
-import { listFolder, message as filesMessage, searchFiles, shareFile } from "@/lib/files/service";
+import { AGENT_MAX_FILES, fileAgentUploads, listDirs, listFolder, message as filesMessage, searchFiles, shareFile } from "@/lib/files/service";
 import { SHARE_EXPIRY } from "@/lib/files/types";
 import { env } from "@/lib/env";
 import { changeDomain, domainOpSchema, errorMessage, pausePihole, resumePihole, updateGravity } from "@/lib/homeserver/operations";
@@ -60,6 +60,13 @@ const actionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("nextcloud.list"), path: z.string().max(4000).default("/") }),
   z.object({ action: z.literal("nextcloud.search"), query: z.string().trim().min(2).max(100) }),
   z.object({ action: z.literal("nextcloud.share"), path: z.string().min(1).max(4000), expiry: z.enum(SHARE_EXPIRY).default("7d") }),
+  z.object({ action: z.literal("nextcloud.dirs") }),
+  z.object({
+    action: z.literal("nextcloud.move"),
+    files: z.array(z.string().min(1).max(4000)).min(1).max(AGENT_MAX_FILES),
+    targetDir: z.string().min(1).max(4000),
+    create: z.boolean().default(false),
+  }),
 ]);
 
 const slimEntry = ({ name, path, size, modifiedAt, isDir }: { name: string; path: string; size: number; modifiedAt: string; isDir: boolean }) => ({
@@ -82,6 +89,12 @@ async function filesAction(a: FilesAction): Promise<Response> {
     }
     if (a.action === "nextcloud.search") {
       return Response.json({ ok: true, entries: (await searchFiles(a.query)).slice(0, 30).map(slimEntry) });
+    }
+    if (a.action === "nextcloud.dirs") return Response.json({ ok: true, dirs: await listDirs() });
+    if (a.action === "nextcloud.move") {
+      const r = await fileAgentUploads(a.files, a.targetDir, a.create);
+      revalidatePath("/", "layout");
+      return Response.json({ ok: r.moved.length > 0, message: r.message, moved: r.moved, failed: r.failed, ...(r.moved.length ? {} : { error: r.message }) }, { status: r.moved.length ? 200 : 502 });
     }
     const s = await shareFile(a.path, a.expiry);
     return Response.json({ ok: true, message: `Link für „${s.name}“ erstellt`, url: s.url, expiresAt: s.expiresAt });
