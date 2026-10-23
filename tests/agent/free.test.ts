@@ -101,3 +101,26 @@ describe("FreeLLM-Modellliste", () => {
     await expect(p.complete({ prompt: "x", model: "a" })).rejects.toThrow("FreeLLM: a: limit · b: limit");
   });
 });
+
+describe("FreeLLM: hängendes Modell", () => {
+  it("bricht nach modelTimeoutMs ab und nimmt das nächste Modell", async () => {
+    const asked: string[] = [];
+    const fetchFn = (async (_url: string, init?: RequestInit) => {
+      const model = JSON.parse(String(init?.body)).model as string;
+      asked.push(model);
+      if (model === "haengt") {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(Object.assign(new Error("timeout"), { name: "TimeoutError" })));
+        });
+      }
+      return Response.json({ choices: [{ message: { content: "ok" } }] });
+    }) as unknown as typeof fetch;
+    const p = new FreeProvider({ ...opts, model: "haengt,schnell", modelTimeoutMs: 50, fetchFn });
+    const started = Date.now();
+    const res = await p.complete({ prompt: "x", model: "x" });
+    expect(res.text).toBe("ok");
+    expect(asked).toEqual(["haengt", "schnell"]);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(p.available()).toBe(true);
+  });
+});

@@ -11,6 +11,8 @@ export type FreeProviderOptions = {
   apiKey?: string;
   model: string;
   timeoutMs: number;
+  /** Höchstzeit pro Modell – ein hängendes Modell darf nicht das ganze Budget fressen */
+  modelTimeoutMs?: number;
   fetchFn?: typeof fetch;
 };
 
@@ -65,7 +67,7 @@ export class FreeProvider implements Provider {
       const left = deadline - Date.now();
       if (left < 1000) break;
       try {
-        const res = await this.attempt(model, req, left);
+        const res = await this.attempt(model, req, Math.min(left, this.o.modelTimeoutMs ?? 30_000));
         return { ...res, durationMs: Date.now() - started };
       } catch (err) {
         if (!(err instanceof ModelError)) throw err;
