@@ -163,6 +163,11 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX permission_log_at ON permission_log (at);
   `,
+  `
+  -- Session-Verwaltung: Anheften und Archivieren (Archiv bleibt durchsuchbar, Titel umbenennbar über title)
+  ALTER TABLE web_sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE web_sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export type AgentDB = DatabaseSync;

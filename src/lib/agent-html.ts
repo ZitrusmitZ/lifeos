@@ -16,8 +16,14 @@ export type AgentMessage = {
   createdAt: number;
   updatedAt: number;
 };
+<<<<<<< HEAD
 export type AgentSession = { id: number; title: string | null; createdAt: number; updatedAt: number; count: number };
 export type AgentStatus = { telegram: boolean; claude: boolean; ollama: boolean; dryRun: boolean; mode?: "default" | "auto" | "readonly"; autoUntil?: number | null };
+=======
+export type AgentSession = { id: number; title: string | null; createdAt: number; updatedAt: number; count: number; pinned: boolean; archived: boolean };
+export type AgentSessionView = "active" | "pinned" | "archived";
+export type AgentStatus = { telegram: boolean; claude: boolean; ollama: boolean; dryRun: boolean };
+>>>>>>> origin/main
 
 export type AgentTag = "b" | "i" | "u" | "s" | "code" | "pre";
 export type AgentNode = { type: "text"; text: string } | { type: AgentTag; children: AgentNode[] };

@@ -254,3 +254,12 @@ Der Feed kommt vom Agenten (`GET /feed` auf dem Web-Socket): nach einem Update d
 | Backup jetzt | `sudo deploy/backup.sh` (läuft sonst täglich 03:30, 14 Tage Aufbewahrung in `data/backups/`) |
 | Wiederherstellen | `docker compose down && rm -f data/lifeos.db-wal data/lifeos.db-shm && cp data/backups/lifeos-JJJJ-MM-TT.db data/lifeos.db && docker compose up -d --no-build` |
 | Tailscale-Freigabe prüfen | `tailscale serve status` |
+
+### Session-Verwaltung (Web-Chat / Island)
+
+Die Unterhaltungen des Agenten lassen sich anheften, archivieren, umbenennen, löschen und als Markdown exportieren. Metadaten (`pinned`, `archived`, Titel) liegen in `web_sessions` der Agent-DB (Migration 5). API (LifeOS, Tailnet-Zugriff wie `/api/agent/*`; der Agent selbst spricht denselben Pfad am Web-Socket):
+
+- `GET /api/agent/sessions?view=active|pinned|archived&q=` – Angeheftete zuerst; archivierte nur mit `view=archived` (Suche über Titel und Nachrichten)
+- `PATCH /api/agent/sessions/:id` – `{title?, pinned?, archived?}` (leerer Titel = automatisch; Archivieren löst die Anheftung)
+- `GET /api/agent/sessions/:id/export` – Markdown-Download
+- Verlauf lesen/weiterschreiben: `GET`/`POST /api/agent/sessions/:id` (Anhänge wie `/api/agent/uploads`)
