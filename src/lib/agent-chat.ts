@@ -1,5 +1,6 @@
 import "server-only";
 import { request } from "node:http";
+import { demoAgentRequest } from "@/lib/agent-demo";
 import { env, isDemo } from "@/lib/env";
 
 /**
@@ -13,6 +14,7 @@ const TIMEOUT_MS = 10_000;
 const UNREACHABLE: AgentReply = { status: 503, json: { error: "Agent nicht erreichbar" } };
 
 export function agentRequest(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<AgentReply> {
+  if (isDemo()) return Promise.resolve(demoAgentRequest(method, path, body));
   const payload = body === undefined ? undefined : JSON.stringify(body);
   return send(method, path, payload === undefined ? undefined : { data: payload, type: "application/json" }, TIMEOUT_MS);
 }
