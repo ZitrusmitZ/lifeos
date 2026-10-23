@@ -70,6 +70,12 @@ export class WebMessenger implements Messenger {
   busy(sessionId: number): boolean {
     return this.working.has(sessionId) || (this.typingUntil.get(sessionId) ?? 0) > this.now();
   }
+
+  /** Alle Unterhaltungen, die gerade „tippen“ (für den Island-Feed). */
+  busySessions(): number[] {
+    const ids = new Set([...this.working.keys(), ...this.typingUntil.keys()]);
+    return [...ids].filter((id) => this.busy(id)).sort((a, b) => a - b);
+  }
 }
 
 /** Verteilt nach Chat-ID auf Telegram bzw. Web. Ohne Telegram landet alles im Web-Chat (jüngste Unterhaltung). */

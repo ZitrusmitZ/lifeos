@@ -17,6 +17,12 @@ describe("checkAccess", () => {
     expect(checkAccess("/api/health", null, strict).allowed).toBe(true);
     expect(checkAccess("/api/healthz", null, strict).allowed).toBe(false);
   });
+  it("Island-Routen (Laptop) nur mit Tailscale-Identität", () => {
+    for (const p of ["/api/jev", "/api/stt", "/api/agent/feed"]) {
+      expect(checkAccess(p, null, strict)).toMatchObject({ allowed: false, status: 401 });
+      expect(checkAccess(p, "SpySpecter@github", strict).allowed).toBe(true);
+    }
+  });
   it("gibt nur Freigabe-Links frei, nicht die Datei-API", () => {
     const token = "a".repeat(43);
     for (const p of [`/d/${token}`, `/d/${token}/download`, `/d/${token}/bild`]) expect(checkAccess(p, null, strict)).toMatchObject({ allowed: true });

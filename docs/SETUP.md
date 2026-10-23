@@ -220,6 +220,31 @@ Danach z. B.: „Was steht heute an?“, „Hak Vokabeln ab“, „Erinner mich 
 
 ---
 
+## 9. Island (Laptop)
+
+Die „Island“ auf dem Laptop (GNOME-Shell-Extension + Daemon `islandd`, Repo `~/AIStack/island`) zeigt offene Freigaben und laufende Coding-Agents an, entscheidet per Klick und gibt Sprachbefehle weiter. Sie spricht LifeOS unter `APP_URL` an (z. B. `https://home.<tailnet>.ts.net`) – Zugriff wie beim Dashboard über die Tailscale-Identität (`ALLOWED_TAILSCALE_USERS`), kein eigener Token.
+
+| Route | Zweck |
+|---|---|
+| `GET /api/agent/feed?since=<ms>` | Offene Freigaben **aller** Chats (Telegram und Web: Bestätigungen `c:`, Job-Vorschläge `j:`, Connector-/Root-Freigaben `a:`), Coding-Agents, Unterhaltungen, die gerade antworten. `pending` ist immer vollständig – per Telegram Entschiedenes fehlt beim nächsten Poll. `since` gilt nur für `coders` (laufende plus seit `since` geänderte, Standard: letzte 24 h). |
+| `POST /api/agent/action` | `{data}` mit `allow`/`deny` aus dem Feed – dieselben Daten wie die Buttons |
+| `POST /api/agent/sessions` + `…/messages` | Aufgaben an den Agenten in einer eigenen Web-Unterhaltung |
+| `POST /api/jev` | `{state, questions}` → TypeSafe Jev über OpenRouter (Ersatz für das alte VPS-Relay, gleiches Antwortformat) |
+| `POST /api/stt?lang=de&prompt=…` | Body `audio/wav` (max. 30 s / 2 MB) → `{text, ms}` über Groq Whisper |
+
+In `/opt/lifeos/.env` eintragen (siehe `.env.example`), dann `docker compose up -d --no-build`:
+
+```bash
+OPENROUTER_API_KEY=sk-or-…   # openrouter.ai → Keys
+GROQ_API_KEY=gsk_…           # console.groq.com → API Keys
+```
+
+Ohne Schlüssel antworten `/api/jev` bzw. `/api/stt` mit 503 (`jev_not_configured`/`stt_not_configured`); die Island fällt dann auf lokales Whisper zurück. Beide Routen prüfen vorher das KI-Monatsbudget (402 `budget_exceeded`) und buchen in `llm_usage` (`purpose` `jev` bzw. `stt`).
+
+Der Feed kommt vom Agenten (`GET /feed` auf dem Web-Socket): nach einem Update des Agenten (`scripts/install_agent.sh`) ist er da; ohne neuen Agenten antwortet `/api/agent/feed` mit 404.
+
+---
+
 ## Betrieb
 
 | Aufgabe | Befehl (auf dem VPS, in `/opt/lifeos`) |

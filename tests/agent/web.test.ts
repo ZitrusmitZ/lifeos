@@ -1,16 +1,19 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ConfirmFlow } from "@/agent/confirm";
+import { ConfirmFlow, createPending } from "@/agent/confirm";
 import { Gateway } from "@/agent/gateway";
+import { ROOT_TOOL_NAME } from "@/agent/mcp/approve-server";
+import { ApprovalBroker } from "@/agent/mcp/approvals";
 import { ClaudeProvider } from "@/agent/providers/claude";
 import { QuotaError } from "@/agent/providers/types";
 import { queuedTasks } from "@/agent/quota";
 import { Router } from "@/agent/router";
 import { listJobs } from "@/agent/scheduler/scheduler";
 import type { Runner } from "@/agent/tools/exec";
+import { buildFeed, type FeedPending } from "@/agent/web/feed";
 import { ChannelMessenger, pushChatId, WEB_LATEST, WebMessenger, webChatId } from "@/agent/web/messenger";
 import { checkBearer, startWebServer, type WebServerDeps } from "@/agent/web/server";
 import { addMessage, createSession, deleteSession, getSession, latestSessionId, listMessages, listSessions } from "@/agent/web/store";
@@ -34,8 +37,9 @@ function setup(opts: { telegram?: boolean } = {}) {
   const router = new Router({ db, local, claude, api, localModel: "qwen2.5:3b", models: { simple: "haiku", complex: "sonnet", hard: "opus" }, tz: TZ, now: () => now });
   const run = vi.fn<Runner>(async () => ({ code: 0, stdout: "ok", stderr: "" }));
   const confirm = new ConfirmFlow(db, messenger, { cfg, run, dryRun: false }, () => now);
-  const gw = new Gateway({ db, tg: messenger, cfg, router, confirm, local, claude, now: () => now });
-  return { db, tg, web, messenger, gw, run, claudeFake, advance: (ms: number) => (now += ms) };
+  const approvals = new ApprovalBroker(db, messenger, () => now);
+  const gw = new Gateway({ db, tg: messenger, cfg, router, confirm, local, claude, approvals, now: () => now });
+  return { db, tg, web, messenger, gw, approvals, run, claudeFake, now: () => now, advance: (ms: number) => (now += ms) };
 }
 
 const agentMsgs = (db: ReturnType<typeof agentDb>, sid: number) => listMessages(db, sid).filter((m) => m.role === "agent");
@@ -177,6 +181,59 @@ describe("Gateway über den Web-Chat", () => {
   });
 });
 
+describe("Island-Feed", () => {
+  const STATUS = { telegram: true, claude: true, ollama: true, dryRun: false };
+
+  it("offene Freigaben aus allen Chats mit exakten Button-Daten; per Telegram entschieden → beim nächsten Poll weg", async () => {
+    const { db, gw, web, approvals, tg, now, advance } = setup();
+    const feed = () => buildFeed({ db, web, status: () => STATUS, approvals }, now());
+    const sid = createSession(db, NOW);
+    await gw.handleWebText(sid, "Starte Minecraft neu");
+    await gw.proposeJob(LUIS, "jeden Freitag um 16 Uhr an <Wäsche>");
+    const root = approvals.request(LUIS, ROOT_TOOL_NAME, { command: "systemctl restart docker", reason: "hängt" });
+    await vi.waitFor(() => expect(tg.sent).toHaveLength(2));
+    // verwaist (Agent neu gestartet): niemand wartet mehr darauf
+    createPending(db, { tool: "connector:mcp__claude_ai_Gmail__send_message", params: {}, preview: "x", chatId: LUIS }, now());
+
+    const pending = feed().pending;
+    expect(pending.map((p) => [p.kind, p.chat_id, p.session_id, p.root])).toEqual([
+      ["confirm", webChatId(sid), sid, false],
+      ["job", LUIS, null, false],
+      ["approval", LUIS, null, true],
+    ]);
+    const [confirm, job, approval] = pending as [FeedPending, FeedPending, FeedPending];
+    expect(confirm).toMatchObject({ tool: "minecraft_restart", allow: `c:${confirm.id}:y`, deny: `c:${confirm.id}:n` });
+    expect(confirm.expires_at - confirm.created_at).toBe(5 * 60_000);
+    expect(agentMsgs(db, sid)[0].buttons!.flat().map((b) => b.callback_data)).toEqual([confirm.allow, confirm.deny]);
+    expect(job.preview_html).toMatch(/^<code>0 16 \* \* 5<\/code> – .+ – „&lt;Wäsche&gt;“$/);
+    expect(job.allow).toBe(`j:${job.id}:y`);
+    expect(approval).toMatchObject({ tool: ROOT_TOOL_NAME, allow: `a:${approval.id}:y` });
+    expect(approval.preview_html).toContain("ROOT-Befehl");
+
+    // Telegram-Klick (gleiche Daten) – die Island sieht die Freigabe nicht mehr
+    await approvals.onCallback(approval.deny, "cb");
+    expect(await root).toMatchObject({ allow: false });
+    await gw.handleWebAction(job.allow);
+    expect(feed().pending.map((p) => p.id)).toEqual([confirm.id]);
+
+    advance(5 * 60_000);
+    expect(feed().pending).toEqual([]);
+  });
+
+  it("busy_sessions: alle Unterhaltungen, die gerade antworten", async () => {
+    const { db, web } = setup();
+    const a = createSession(db, NOW);
+    const b = createSession(db, NOW);
+    let release!: () => void;
+    const running = web.track(b, () => new Promise<void>((r) => (release = r)));
+    await web.typing(webChatId(a));
+    expect(buildFeed({ db, web, status: () => STATUS }, NOW).busy_sessions).toEqual([a, b]);
+    release();
+    await running;
+    expect(web.busySessions()).toEqual([a]);
+  });
+});
+
 describe("Socket-Server", () => {
   let dir: string | null = null;
   afterEach(() => {
@@ -200,15 +257,19 @@ describe("Socket-Server", () => {
     const s = setup();
     dir = mkdtempSync(path.join(tmpdir(), "agent-web-"));
     const sock = path.join(dir, "web.sock");
+    const coderState = path.join(dir, "coder");
     const deps: WebServerDeps = {
       db: s.db,
       gateway: s.gw,
       web: s.web,
       token: "geheim",
       status: () => ({ telegram: true, claude: true, ollama: true, dryRun: false }),
+      approvals: s.approvals,
+      coderState,
+      now: s.now,
     };
     const server = await startWebServer(sock, deps);
-    return { ...s, sock, close: () => new Promise((r) => server.close(r)) };
+    return { ...s, sock, coderState, close: () => new Promise((r) => server.close(r)) };
   }
 
   it("Bearer-Prüfung", () => {
@@ -251,6 +312,43 @@ describe("Socket-Server", () => {
 
       expect((await call(sock, "DELETE", `/sessions/${id}`)).status).toBe(200);
       expect((await call(sock, "GET", `/sessions/${id}/messages`)).status).toBe(404);
+    } finally {
+      await close();
+    }
+  });
+  it("GET /feed: Token-Pflicht, `since` geprüft, Coding-Agents ohne Token, mit Zusammenfassung und letzten Texten", async () => {
+    const { db, sock, coderState, close } = await serve();
+    const coder = (id: string, status: string, updatedAt: number) =>
+      db
+        .prepare("INSERT INTO coding_sessions (id, repo, task, chat_id, token, status, provider, created_at, updated_at) VALUES (?, 'lifeos', 'Bug fixen', ?, ?, ?, 'claude', ?, ?)")
+        .run(id, LUIS, `tok-${id}`, status, updatedAt - 1000, updatedAt);
+    coder("aaaaaaaaaaaa", "running", NOW - 3 * 86_400_000);
+    coder("bbbbbbbbbbbb", "done", NOW - 3_600_000);
+    coder("cccccccccccc", "done", NOW - 2 * 86_400_000);
+    mkdirSync(path.join(coderState, "aaaaaaaaaaaa"), { recursive: true });
+    writeFileSync(path.join(coderState, "aaaaaaaaaaaa", "status.json"), JSON.stringify({ status: "running", provider: "claude", summary: "Halb fertig", updatedAt: NOW }));
+    const ev = (content: unknown[]) => JSON.stringify({ type: "assistant", message: { content } });
+    writeFileSync(
+      path.join(coderState, "aaaaaaaaaaaa", "stream.jsonl"),
+      [ev([{ type: "text", text: "Lese Code" }]), ev([{ type: "tool_use", name: "Edit" }]), '{"type":"assist'].join("\n"),
+    );
+    try {
+      expect((await call(sock, "GET", "/feed", undefined, "falsch")).status).toBe(401);
+      expect((await call(sock, "GET", "/feed?since=gestern")).status).toBe(400);
+
+      const res = await call(sock, "GET", "/feed");
+      expect(res.status).toBe(200);
+      expect(res.json).toMatchObject({ now: NOW, status: { telegram: true }, pending: [], busy_sessions: [] });
+      const coders = res.json.coders as Record<string, unknown>[];
+      expect(coders.map((c) => c.id)).toEqual(["bbbbbbbbbbbb", "aaaaaaaaaaaa"]);
+      expect(coders[1]).toMatchObject({ status: "running", summary: "Halb fertig", last_texts: ["Lese Code", "🔧 Edit"] });
+      expect(coders[0]).toMatchObject({ summary: null, last_texts: [] });
+      expect(coders[0]).not.toHaveProperty("token");
+      expect(coders[0]).not.toHaveProperty("chat_id");
+
+      // `since`: nur geänderte (plus laufende)
+      expect(((await call(sock, "GET", `/feed?since=${NOW}`)).json.coders as { id: string }[]).map((c) => c.id)).toEqual(["aaaaaaaaaaaa"]);
+      expect(((await call(sock, "GET", "/feed?since=0")).json.coders as unknown[]).length).toBe(3);
     } finally {
       await close();
     }

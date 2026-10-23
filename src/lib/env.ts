@@ -63,6 +63,13 @@ const schema = z.object({
   /** Unix-Socket des LifeOS-Agenten (Web-Chat), vom Host eingebunden – siehe compose.yaml */
   AGENT_SOCKET: z.preprocess(emptyAsUnset, z.string().default("/run/lifeos-agent/web.sock")),
 
+  // Island (Laptop, ~/AIStack/island): Schlüssel bleiben hier, Kosten zählen ins KI-Monatsbudget
+  /** TypeSafe Jev über OpenRouter (`POST /api/jev`) */
+  OPENROUTER_API_KEY: optional,
+  JEV_MODEL: z.preprocess(emptyAsUnset, z.string().default("typesafe/jev-1.13")),
+  /** Spracherkennung über Groq Whisper (`POST /api/stt`) */
+  GROQ_API_KEY: optional,
+
   NEWS_FEEDS: z.preprocess(
     emptyAsUnset,
     z.string().default(
