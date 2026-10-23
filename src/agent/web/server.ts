@@ -9,6 +9,7 @@ import { escapeHtml } from "../telegram/format.ts";
 import { attachmentsSchema } from "../uploads.ts";
 import { buildFeed, type FeedDeps } from "./feed.ts";
 import type { WebMessenger } from "./messenger.ts";
+import type { Transcriber } from "./stt.ts";
 import { addMessage, createSession, deleteSession, getSession, listMessages, listSessions } from "./store.ts";
 
 /**
@@ -24,10 +25,14 @@ import { addMessage, createSession, deleteSession, getSession, listMessages, lis
  *   DELETE /sessions/:id
  *   POST   /actions                      {data} Button-Klick
  *   GET    /feed?since=                  offene Freigaben aller Chats, Coding-Agents, „tippt…“ (Laptop-Island, siehe feed.ts)
+ *   POST   /stt?lang=&prompt=            Body audio/wav → {text, via} über FreeLLM (für /api/stt ohne Groq-Key, siehe stt.ts)
  */
 
 export const MAX_TEXT = 4000;
 const MAX_BODY = 16 * 1024;
+/** wie MAX_STT_BYTES in src/lib/stt.ts (LifeOS prüft Länge und Format schon vorher) */
+const MAX_AUDIO = 2 * 1024 * 1024;
+const PROMPT_MAX = 600;
 
 export type WebStatus = { telegram: boolean; claude: boolean; ollama: boolean; dryRun: boolean };
 
@@ -40,6 +45,8 @@ export type WebServerDeps = {
   /** Für `/feed`: offene Connector-Freigaben (nur im Speicher) und Status-Verzeichnis der Coding-Agents */
   approvals?: FeedDeps["approvals"];
   coderState?: string;
+  /** Spracherkennung über FreeLLM; fehlt, wenn `FREE_LLM_KEY` nicht gesetzt ist (dann 503) */
+  stt?: Transcriber;
   now?: () => number;
 };
 
@@ -64,16 +71,21 @@ class HttpError extends Error {
   }
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readBody(req: IncomingMessage, max: number): Promise<Buffer> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new HttpError(413, "Anfrage zu groß");
+    if (size > max) throw new HttpError(413, "Anfrage zu groß");
     chunks.push(chunk as Buffer);
   }
+  return Buffer.concat(chunks);
+}
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const body = await readBody(req, MAX_BODY);
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+    return JSON.parse(body.toString("utf8") || "{}");
   } catch {
     throw new HttpError(400, "Ungültiges JSON");
   }
@@ -136,6 +148,22 @@ export function createWebHandler(deps: WebServerDeps) {
       const since = num(raw);
       if (raw !== null && since === undefined) throw new HttpError(400, "`since` muss eine Zahl (ms) sein");
       return { status: 200, body: buildFeed(deps, now(), since) };
+    }
+
+    if (parts[0] === "stt" && parts.length === 1 && method === "POST") {
+      if (!deps.stt) throw new HttpError(503, "FreeLLM-Spracherkennung nicht eingerichtet (FREE_LLM_KEY fehlt)");
+      const lang = url.searchParams.get("lang") ?? "de";
+      if (!/^[a-z]{2,3}$/.test(lang)) throw new HttpError(400, "`lang` muss ein Sprachcode wie „de“ sein");
+      const audio = await readBody(req, MAX_AUDIO);
+      if (!audio.length) throw new HttpError(400, "Audio fehlt");
+      const prompt = url.searchParams.get("prompt")?.trim().slice(0, PROMPT_MAX) || undefined;
+      try {
+        return { status: 200, body: await deps.stt(audio, { lang, prompt }) };
+      } catch (err) {
+        const reason = (err as Error).name === "TimeoutError" ? "Zeitüberschreitung" : (err as Error).message;
+        log.warn("stt", `FreeLLM: ${reason}`);
+        throw new HttpError(502, `FreeLLM nicht verfügbar (${reason.slice(0, 120)})`);
+      }
     }
 
     if (parts[0] === "actions" && parts.length === 1 && method === "POST") {

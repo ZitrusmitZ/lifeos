@@ -230,16 +230,16 @@ Die „Island“ auf dem Laptop (GNOME-Shell-Extension + Daemon `islandd`, Repo 
 | `POST /api/agent/action` | `{data}` mit `allow`/`deny` aus dem Feed – dieselben Daten wie die Buttons |
 | `POST /api/agent/sessions` + `…/messages` | Aufgaben an den Agenten in einer eigenen Web-Unterhaltung |
 | `POST /api/jev` | `{state, questions}` → TypeSafe Jev über OpenRouter (Ersatz für das alte VPS-Relay, gleiches Antwortformat) |
-| `POST /api/stt?lang=de&prompt=…` | Body `audio/wav` (max. 30 s / 2 MB) → `{text, ms}` über Groq Whisper |
+| `POST /api/stt?lang=de&prompt=…` | Body `audio/wav` (max. 30 s / 2 MB) → `{text, ms}` über Groq Whisper, ohne `GROQ_API_KEY` über FreeLLM (`{text, ms, via}`) |
 
 In `/opt/lifeos/.env` eintragen (siehe `.env.example`), dann `docker compose up -d --no-build`:
 
 ```bash
 OPENROUTER_API_KEY=sk-or-…   # openrouter.ai → Keys
-GROQ_API_KEY=gsk_…           # console.groq.com → API Keys
+GROQ_API_KEY=gsk_…           # console.groq.com → API Keys (optional, siehe FreeLLM)
 ```
 
-Ohne Schlüssel antworten `/api/jev` bzw. `/api/stt` mit 503 (`jev_not_configured`/`stt_not_configured`); die Island fällt dann auf lokales Whisper zurück. Beide Routen prüfen vorher das KI-Monatsbudget (402 `budget_exceeded`) und buchen in `llm_usage` (`purpose` `jev` bzw. `stt`).
+Ohne `OPENROUTER_API_KEY` antwortet `/api/jev` mit 503 (`jev_not_configured`). Ohne `GROQ_API_KEY` schickt `/api/stt` das Audio an den Agenten (`POST /stt` auf dem Web-Socket), der FreeLLMAPI auf dem Host fragt (`FREE_LLM_KEY` in `agent.env`, Modell `FREE_LLM_STT_MODEL`, Standard `whisper-1`) – kostenlos, kein weiterer Schlüssel in dieser `.env`; der Container selbst erreicht `127.0.0.1:3001` des Hosts nicht. Fehlt auch das (oder läuft ein Agent ohne `/stt`), kommt 503 `stt_not_configured`, bei FreeLLM-Fehlern 502 `freellm_unavailable`; die Island fällt dann auf lokales Whisper zurück. Groq und Jev prüfen vorher das KI-Monatsbudget (402 `budget_exceeded`); gebucht wird in `llm_usage` (`purpose` `jev` bzw. `stt`, FreeLLM mit 0 $ und Modell `freellm:<Anbieter>`).
 
 Der Feed kommt vom Agenten (`GET /feed` auf dem Web-Socket): nach einem Update des Agenten (`scripts/install_agent.sh`) ist er da; ohne neuen Agenten antwortet `/api/agent/feed` mit 404.
 
