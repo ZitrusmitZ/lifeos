@@ -31,6 +31,9 @@ export const commandHash = (command: string) => createHash("sha256").update(comm
 
 /** `mcp__claude_ai_Gmail__create_draft` → `Gmail · create_draft` */
 export function prettyToolName(name: string): string {
+  // eigene Tools: `lifeos:backup_run` (Agent-Modus), `mcp__lifeos_approve__root_command`
+  const own = name.match(/^(?:lifeos:|mcp__lifeos_approve__)(.+)$/);
+  if (own) return own[1];
   const m = name.match(/^mcp__(.+?)__(.+)$/);
   if (!m) return name;
   return `${m[1].replace(/^claude_ai_/, "").replace(/_/g, " ")} · ${m[2]}`;

@@ -56,14 +56,19 @@ export function describeStep(name: string, input: Record<string, unknown>): stri
     const v = input[k];
     return typeof v === "string" ? (v.length > n ? `${v.slice(0, n)}…` : v) : "";
   };
+  /** lange Pfade von vorne kürzen – das Ende ist interessant */
+  const p = (k: string) => {
+    const v = s(k, 1000);
+    return v.length > 60 ? `…${v.slice(-59)}` : v;
+  };
   switch (name) {
     case "Bash":
       return `$ ${s("command")}`;
     case "Read":
-      return `📄 ${s("file_path")}`;
+      return `📄 ${p("file_path")}`;
     case "Edit":
     case "Write":
-      return `✏️ ${s("file_path")}`;
+      return `✏️ ${p("file_path")}`;
     case "Grep":
     case "Glob":
       return `🔎 ${s("pattern")}`;
@@ -87,12 +92,16 @@ export class Progress {
   private chain: Promise<unknown> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private count = 0;
+  private shown = "";
+  private readonly msg: Messenger;
+  private readonly chatId: number;
+  private readonly now: () => number;
 
-  constructor(
-    private readonly msg: Messenger,
-    private readonly chatId: number,
-    private readonly now: () => number = Date.now,
-  ) {}
+  constructor(msg: Messenger, chatId: number, now: () => number = Date.now) {
+    this.msg = msg;
+    this.chatId = chatId;
+    this.now = now;
+  }
 
   onLine = (line: string): void => {
     let ev: { type?: string; message?: { content?: { type: string; name?: string; input?: Record<string, unknown> }[] } };
@@ -129,6 +138,8 @@ export class Progress {
   private flush(done?: string): Promise<unknown> {
     this.lastEdit = this.now();
     const html = this.render(done);
+    if (html === this.shown) return this.chain;
+    this.shown = html;
     this.chain = this.chain
       .then(async () => {
         if (this.messageId === null) this.messageId = await this.msg.send(this.chatId, html);

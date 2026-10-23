@@ -22,7 +22,8 @@ export type GateTool = { name: string; description: string; inputSchema: Record<
 const gateable = () => (TOOLS as Tool<unknown>[]).filter((t) => !EXCLUDE.has(t.name));
 
 function inputSchema(params: z.ZodType): Record<string, unknown> {
-  const { $schema: _drop, ...schema } = z.toJSONSchema(params, { io: "input", unrepresentable: "any" }) as Record<string, unknown>;
+  const schema = z.toJSONSchema(params, { io: "input", unrepresentable: "any" }) as Record<string, unknown>;
+  delete schema.$schema;
   return { type: "object", properties: {}, ...schema };
 }
 
