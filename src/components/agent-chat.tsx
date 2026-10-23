@@ -1,10 +1,11 @@
 "use client";
 
 import { ContextMenu } from "@base-ui/react/context-menu";
-import { ArrowDown, ArrowUp, Check, Copy, FileText, History, MessageCircle, Paperclip, RefreshCw, SquarePen, TriangleAlert, WifiOff, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Copy, FileText, History, MessageCircle, Paperclip, RefreshCw, ShieldAlert, SquarePen, TriangleAlert, WifiOff, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { AutoModeFrame, formatRemaining, useRemaining } from "@/components/agent-permissions";
 import { Sheet } from "@/components/ios/sheet";
 import { Button } from "@/components/ui/button";
 import { draftKey, isNearBottom, nodesToText, shouldSendOnEnter, splitLinks } from "@/lib/agent-input";
@@ -53,9 +54,9 @@ function uploadFile(file: File, onProgress: (p: number) => void): Promise<Reply<
   });
 }
 
-type Reply<T> = ({ ok: true } & T) | { ok: false; error: string };
+export type Reply<T> = ({ ok: true } & T) | { ok: false; error: string };
 
-async function call<T>(method: string, url: string, body?: unknown): Promise<Reply<T>> {
+export async function call<T>(method: string, url: string, body?: unknown): Promise<Reply<T>> {
   try {
     const res = await fetch(url, {
       method,
@@ -256,16 +257,30 @@ function Bubble({
 }
 
 function StatusLine({ status, error, online, onRetry }: { status: AgentStatus | null; error: string | null; online: boolean; onRetry: () => void }) {
+  const autoLeft = useRemaining(status?.mode === "auto" ? status.autoUntil : null);
+  const autoBanner =
+    status?.mode === "auto" && autoLeft !== null && autoLeft > 0 ? (
+      <div role="status" className="flex items-center gap-2 rounded-xl bg-warning/15 px-3 py-2 text-footnote font-semibold">
+        <AutoModeFrame />
+        <ShieldAlert className="size-4 shrink-0 text-warning" aria-hidden />
+        <span className="min-w-0 flex-1">Auto-Modus aktiv · noch {formatRemaining(autoLeft)}</span>
+        <Link href="/agent/berechtigungen" className="shrink-0 text-tint-text active:opacity-60">
+          Verwalten
+        </Link>
+      </div>
+    ) : null;
   const offline = !online || error === "Keine Verbindung";
   const notes = offline
     ? ["Keine Verbindung – Nachrichten werden erst gesendet, wenn du wieder online bist"]
     : error
       ? [error]
       : [status && !status.claude ? "Claude offline – nur lokales Modell" : null, status?.dryRun ? "Dry-Run: Aktionen werden nur simuliert" : null].filter(Boolean);
-  if (!notes.length) return null;
+  if (!notes.length) return autoBanner;
   const Icon = offline ? WifiOff : TriangleAlert;
   const bad = offline || Boolean(error);
   return (
+    <>
+      {autoBanner}
     <div
       role="status"
       className={cn("flex items-start gap-2 rounded-xl px-3 py-2 text-footnote", bad ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")}
@@ -278,6 +293,7 @@ function StatusLine({ status, error, online, onRetry }: { status: AgentStatus | 
         </button>
       ) : null}
     </div>
+    </>
   );
 }
 
@@ -782,6 +798,7 @@ export function AgentChatButton() {
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [unread, setUnread] = useState(false);
+  const [auto, setAuto] = useState(false);
   const latest = useRef(0);
 
   // Badge: alle 60 s nachsehen, ob seit dem letzten Öffnen etwas Neues kam
@@ -791,8 +808,9 @@ export function AgentChatButton() {
     const check = async () => {
       if (document.visibilityState !== "visible") return;
       const res = await agentApi.sessions();
-      if (stop || !res.ok || !res.sessions[0]) return;
-      setUnread(res.sessions[0].updatedAt > readSeen());
+      if (stop || !res.ok) return;
+      setAuto(res.status.mode === "auto" && (res.status.autoUntil ?? 0) > Date.now());
+      if (res.sessions[0]) setUnread(res.sessions[0].updatedAt > readSeen());
     };
     void check();
     const t = setInterval(() => void check(), 60_000);
@@ -832,14 +850,16 @@ export function AgentChatButton() {
       <button
         type="button"
         onClick={() => void openChat()}
-        aria-label={unread ? "Agent-Chat öffnen, neue Nachricht" : "Agent-Chat öffnen"}
+        aria-label={`Agent-Chat öffnen${unread ? ", neue Nachricht" : ""}${auto ? ", Auto-Modus aktiv" : ""}`}
         inert={kb.isOpen}
         className={cn(
           "fixed bottom-[calc(max(0.5rem,env(safe-area-inset-bottom))+76px)] left-[max(1rem,env(safe-area-inset-left))] z-[35] grid size-12 place-items-center rounded-full border border-border bg-bar text-tint shadow-[0_8px_30px_rgb(0_0_0/0.18)] backdrop-blur-xl backdrop-saturate-150 transition-[transform,opacity] duration-200 active:scale-95 motion-reduce:transition-none desktop:bottom-6 desktop:left-6",
           kb.isOpen && "pointer-events-none translate-y-24 opacity-0",
+          auto && "border-2 border-warning ring-2 ring-warning/40",
         )}
       >
         <MessageCircle className="size-6" aria-hidden />
+        {auto ? <ShieldAlert className="absolute -top-1 -left-1 size-5 rounded-full bg-background p-0.5 text-warning" aria-hidden /> : null}
         {unread ? <span className="absolute top-1 right-1 size-3 rounded-full bg-destructive ring-2 ring-background" aria-hidden /> : null}
       </button>
       <Sheet open={open} onOpenChange={onOpenChange} title="Agent" fill>

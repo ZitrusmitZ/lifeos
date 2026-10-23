@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { AgentDB } from "../db.ts";
 import type { Gateway } from "../gateway.ts";
 import { log } from "../log.ts";
+import { BUILTIN_RULES, settingsSchema, type PermissionPolicy } from "../permissions/policy.ts";
 import { escapeHtml } from "../telegram/format.ts";
 import { attachmentsSchema } from "../uploads.ts";
 import { buildFeed, type FeedDeps } from "./feed.ts";
@@ -27,16 +28,31 @@ import { addMessage, createSession, deleteSession, exportMarkdown, getSession, l
  *   DELETE /sessions/:id
  *   POST   /actions                      {data} Button-Klick
  *   GET    /feed?since=                  offene Freigaben aller Chats, Coding-Agents, „tippt…“ (Laptop-Island, siehe feed.ts)
+ *   GET    /permissions                  Modus, Zeitlimit, Regeln (Datei + eingebaute)
+ *   PUT    /permissions                  {defaultMode, autoModeMinutes, permissions:{allow,ask,deny}} → Datei
+ *   POST   /permissions/mode             {mode: default|auto|readonly, minutes?} – der EINZIGE Weg, den Auto-Modus einzuschalten
+ *   POST   /permissions/extend           {minutes?} Auto-Modus verlängern
+ *   GET    /permissions/log?q=&before=   durchsuchbares Log automatisch genehmigter/blockierter Aufrufe
  *   POST   /stt?lang=&prompt=            Body audio/wav → {text, via} über FreeLLM (für /api/stt ohne Groq-Key, siehe stt.ts)
  */
 
 export const MAX_TEXT = 4000;
 const MAX_BODY = 16 * 1024;
+/** Regeln: bis zu 3 × 200 Regeln à 300 Zeichen */
+const MAX_RULES_BODY = 256 * 1024;
 /** wie MAX_STT_BYTES in src/lib/stt.ts (LifeOS prüft Länge und Format schon vorher) */
 const MAX_AUDIO = 2 * 1024 * 1024;
 const PROMPT_MAX = 600;
 
-export type WebStatus = { telegram: boolean; claude: boolean; ollama: boolean; dryRun: boolean };
+export type WebStatus = {
+  telegram: boolean;
+  claude: boolean;
+  ollama: boolean;
+  dryRun: boolean;
+  /** Berechtigungsmodus; bei `auto` bis wann (ms) – damit jede Oberfläche den Auto-Modus sichtbar markieren kann */
+  mode?: "default" | "auto" | "readonly";
+  autoUntil?: number | null;
+};
 
 export type WebServerDeps = {
   db: AgentDB;
@@ -47,6 +63,8 @@ export type WebServerDeps = {
   /** Für `/feed`: offene Connector-Freigaben (nur im Speicher) und Status-Verzeichnis der Coding-Agents */
   approvals?: FeedDeps["approvals"];
   coderState?: string;
+  /** Berechtigungsregeln und Auto-Modus; fehlt → `/permissions` gibt 404 */
+  permissions?: PermissionPolicy;
   /** Spracherkennung über FreeLLM; fehlt, wenn `FREE_LLM_KEY` nicht gesetzt ist (dann 503) */
   stt?: Transcriber;
   now?: () => number;
@@ -55,12 +73,16 @@ export type WebServerDeps = {
 const messageSchema = z
   .object({ text: z.string().trim().max(MAX_TEXT), attachments: attachmentsSchema.default([]) })
   .refine((m) => m.text.length > 0 || m.attachments.length > 0);
+const modeSchema = z.object({ mode: z.enum(["default", "auto", "readonly"]), minutes: z.number().int().min(1).max(480).optional() });
+const extendSchema = z.object({ minutes: z.number().int().min(1).max(480).optional() });
 const patchSchema = z
   .object({ title: z.string().max(200).nullable().optional(), pinned: z.boolean().optional(), archived: z.boolean().optional() })
   .strict()
   .refine((p) => Object.keys(p).length > 0);
 const VIEWS = new Set<string>(["active", "pinned", "archived"]);
 const actionSchema = z.object({ data: z.string().regex(/^[cja]:[0-9a-f]{12}:[yn]$/) });
+
+const settingsPutSchema = settingsSchema;
 
 const digest = (s: string) => createHash("sha256").update(s).digest();
 
@@ -89,8 +111,8 @@ async function readBody(req: IncomingMessage, max: number): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
-  const body = await readBody(req, MAX_BODY);
+async function readJson(req: IncomingMessage, max = MAX_BODY): Promise<unknown> {
+  const body = await readBody(req, max);
   try {
     return JSON.parse(body.toString("utf8") || "{}");
   } catch {
@@ -163,6 +185,41 @@ export function createWebHandler(deps: WebServerDeps) {
       const since = num(raw);
       if (raw !== null && since === undefined) throw new HttpError(400, "`since` muss eine Zahl (ms) sein");
       return { status: 200, body: buildFeed(deps, now(), since) };
+    }
+
+    if (parts[0] === "permissions") {
+      const policy = deps.permissions;
+      if (!policy) throw new HttpError(404, "Berechtigungen nicht eingerichtet");
+      if (parts.length === 1 && method === "GET") {
+        return {
+          status: 200,
+          body: {
+            state: policy.state(),
+            settings: policy.getSettings(),
+            builtin: BUILTIN_RULES.map((r) => ({ action: r.action, label: r.label })),
+          },
+        };
+      }
+      if (parts.length === 1 && method === "PUT") {
+        const parsed = settingsPutSchema.safeParse(await readJson(req, MAX_RULES_BODY));
+        if (!parsed.success) throw new HttpError(400, `Ungültige Regeln: ${parsed.error.issues[0]?.message ?? "Format"}`);
+        policy.save(parsed.data);
+        return { status: 200, body: { state: policy.state(), settings: policy.getSettings() } };
+      }
+      if (parts[1] === "mode" && parts.length === 2 && method === "POST") {
+        const parsed = modeSchema.safeParse(await readJson(req));
+        if (!parsed.success) throw new HttpError(400, "Modus: default, auto oder readonly");
+        return { status: 200, body: { state: policy.setMode(parsed.data.mode, parsed.data.minutes) } };
+      }
+      if (parts[1] === "extend" && parts.length === 2 && method === "POST") {
+        const parsed = extendSchema.safeParse(await readJson(req));
+        if (!parsed.success) throw new HttpError(400, "Minuten: 1–480");
+        return { status: 200, body: { state: policy.extend(parsed.data.minutes) } };
+      }
+      if (parts[1] === "log" && parts.length === 2 && method === "GET") {
+        const entries = policy.search({ q: url.searchParams.get("q") ?? undefined, before: num(url.searchParams.get("before")), limit: num(url.searchParams.get("limit")) });
+        return { status: 200, body: { entries } };
+      }
     }
 
     if (parts[0] === "stt" && parts.length === 1 && method === "POST") {

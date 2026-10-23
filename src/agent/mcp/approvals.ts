@@ -8,6 +8,7 @@ import { log } from "../log.ts";
 import type { Messenger } from "../telegram/api.ts";
 import { escapeHtml } from "../telegram/format.ts";
 import { checkBearer } from "../web/server.ts";
+import type { PermissionPolicy } from "../permissions/policy.ts";
 import { ROOT_TOOL_NAME } from "./approve-server.ts";
 import type { ToolGate } from "./tool-gate.ts";
 
@@ -60,15 +61,41 @@ export class ApprovalBroker {
   private readonly now: () => number;
   private readonly waiting = new Map<string, Waiter>();
   private readonly grants = new Map<string, Grant>();
+  private readonly policy: PermissionPolicy | undefined;
 
-  constructor(db: AgentDB, msg: Messenger, now: () => number = Date.now) {
+  constructor(db: AgentDB, msg: Messenger, now: () => number = Date.now, policy?: PermissionPolicy) {
     this.db = db;
     this.msg = msg;
     this.now = now;
+    this.policy = policy;
+  }
+
+  private grantRoot(id: string, tool: string, input: unknown, chatId: number): string | undefined {
+    const command = (input as { command?: unknown } | null)?.command;
+    if (!isRootTool(tool) || typeof command !== "string") return undefined;
+    this.grants.set(id, { sha: commandHash(command), chatId, expiresAt: this.now() + ROOT_GRANT_MS });
+    return id;
+  }
+
+  /** Berechtigungsregeln (siehe permissions/policy.ts): blockieren oder ohne Klick freigeben; `null` = Luis fragen */
+  private byPolicy(chatId: number, tool: string, input: unknown): Decision | null {
+    const v = this.policy?.evaluate(tool, input);
+    if (!this.policy || !v || v.action === "ask") return null;
+    const entry = { tool: prettyToolName(tool), command: this.policy.describe(input), rule: v.rule, chatId };
+    if (v.action === "deny") {
+      this.policy.record({ ...entry, decision: "deny" });
+      log.warn("permissions", `${entry.tool} blockiert (${v.rule})`);
+      return { allow: false, message: `Durch Berechtigungsregel blockiert (${v.rule}). Nicht erneut versuchen, außer Luis bittet darum.` };
+    }
+    this.policy.record({ ...entry, decision: v.source === "mode" ? "auto" : "allow" });
+    log.info("permissions", `${entry.tool} automatisch freigegeben (${v.rule})`);
+    return { allow: true, grant: this.grantRoot(randomBytes(6).toString("hex"), tool, input, chatId) };
   }
 
   /** Vorschau mit Buttons senden und auf Luis' Entscheidung warten. */
   async request(chatId: number, tool: string, input: unknown, origin?: string, customPreview?: string): Promise<Decision> {
+    const auto = this.byPolicy(chatId, tool, input);
+    if (auto) return auto;
     const preview = customPreview ?? approvalPreview(tool, input);
     const id = createPending(this.db, { tool: `${APPROVAL_PREFIX}${tool}`, params: input, preview, chatId }, this.now());
     const decision = new Promise<Decision>((resolve) => {
@@ -104,11 +131,7 @@ export class ApprovalBroker {
       await this.msg.edit(row.chat_id, row.message_id, `${allow ? "✅ Freigegeben" : "✖️ Abgelehnt"}: ${escapeHtml(prettyToolName(tool))}`);
     }
     const params = JSON.parse(row.params) as { command?: unknown };
-    let grant: string | undefined;
-    if (allow && isRootTool(tool) && typeof params.command === "string") {
-      grant = row.id;
-      this.grants.set(grant, { sha: commandHash(params.command), chatId: row.chat_id, expiresAt: this.now() + ROOT_GRANT_MS });
-    }
+    const grant = allow ? this.grantRoot(row.id, tool, params, row.chat_id) : undefined;
     if (!this.settle(row.id, allow ? { allow, grant } : { allow, message: "Von Luis abgelehnt" })) {
       if (grant) this.grants.delete(grant);
       // Agent wurde inzwischen neu gestartet – die CLI-Anfrage gibt es nicht mehr

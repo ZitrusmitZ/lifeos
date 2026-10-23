@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AgentConversation, agentApi } from "@/components/agent-chat";
+import { AutoModeBar } from "@/components/agent-permissions";
 import { Segmented } from "@/components/ios/segmented";
 import { SwipeRow } from "@/components/ios/swipe-row";
 import { PageHeader } from "@/components/page-header";
@@ -268,6 +269,7 @@ export function AgentHistory({ activeId }: { activeId: number | null }) {
     <div className="flex flex-col gap-4">
       <div className={cn(activeId && "hidden desktop:block")}>
         <PageHeader title="Agent" trailing={newButton} />
+        <AutoModeBar />
       </div>
       {error ? <p className="text-footnote text-destructive">{error}</p> : null}
       <div className="desktop:grid desktop:grid-cols-[320px_minmax(0,1fr)] desktop:gap-8">

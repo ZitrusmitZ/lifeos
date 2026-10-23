@@ -13,7 +13,11 @@ export type AgentReply = { status: number; json: Record<string, unknown> };
 const TIMEOUT_MS = 10_000;
 const UNREACHABLE: AgentReply = { status: 503, json: { error: "Agent nicht erreichbar" } };
 
+<<<<<<< HEAD
+export function agentRequest(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<AgentReply> {
+=======
 export function agentRequest(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<AgentReply> {
+>>>>>>> origin/main
   if (isDemo()) return Promise.resolve(demoAgentRequest(method, path, body));
   const payload = body === undefined ? undefined : JSON.stringify(body);
   return send(method, path, payload === undefined ? undefined : { data: payload, type: "application/json" }, TIMEOUT_MS);
@@ -60,6 +64,12 @@ function send(method: string, path: string, payload: { data: string | Uint8Array
     req.on("error", () => resolve(UNREACHABLE));
     req.end(payload?.data);
   });
+}
+
+/** JSON-Body einer ändernden Anfrage; nur mit `Content-Type: application/json` (keine Formular-/text-plain-Posts von fremden Seiten) */
+export async function jsonBody(request: Request): Promise<unknown> {
+  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return null;
+  return request.json().catch(() => null);
 }
 
 export const agentResponse = (r: AgentReply) => Response.json(r.json, { status: r.status, headers: { "Cache-Control": "no-store" } });

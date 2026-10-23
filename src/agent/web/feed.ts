@@ -1,4 +1,5 @@
 import { lastAssistantTexts, readCoderStatus, type CodingSession } from "../coder/sessions.ts";
+import type { PermissionPolicy, PermissionState } from "../permissions/policy.ts";
 import type { PendingRow } from "../confirm.ts";
 import type { AgentDB } from "../db.ts";
 import { APPROVAL_PREFIX, isRootTool } from "../mcp/approvals.ts";
@@ -47,7 +48,7 @@ export type FeedCoder = {
   updated_at: number;
 };
 
-export type Feed = { now: number; status: WebStatus; pending: FeedPending[]; coders: FeedCoder[]; busy_sessions: number[] };
+export type Feed = { now: number; status: WebStatus; pending: FeedPending[]; coders: FeedCoder[]; busy_sessions: number[]; permissions: PermissionState | null };
 
 export type FeedDeps = {
   db: AgentDB;
@@ -57,6 +58,8 @@ export type FeedDeps = {
   approvals?: { isWaiting(id: string): boolean };
   /** `AGENT_CODER_STATE` (status.json, stream.jsonl); fehlt → keine Coding-Agents */
   coderState?: string;
+  /** Modus (Auto-Modus samt Ablaufzeit) für die Island; geändert wird er über `/permissions/mode` */
+  permissions?: Pick<PermissionPolicy, "state">;
 };
 
 const PREFIX = { confirm: "c", job: "j", approval: "a" } as const;
@@ -137,5 +140,6 @@ export function buildFeed(deps: FeedDeps, now: number, since?: number): Feed {
     pending: feedPending(deps, now),
     coders: deps.coderState ? feedCoders(deps.db, deps.coderState, since ?? now - CODER_WINDOW_MS) : [],
     busy_sessions: deps.web.busySessions(),
+    permissions: deps.permissions?.state() ?? null,
   };
 }

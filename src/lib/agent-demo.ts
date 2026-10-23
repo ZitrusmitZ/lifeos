@@ -63,13 +63,29 @@ function seed(): Store {
   };
 }
 
+/** Demo: Berechtigungen nur zum Anschauen (Modus bleibt „Standard“) */
+function demoPermissions(sub?: string): Record<string, unknown> {
+  const state = { mode: "default", baseMode: "default", autoUntil: null, autoModeMinutes: 60, now: Date.now(), fileError: null };
+  if (sub === "log") return { entries: [] };
+  return {
+    state,
+    settings: { defaultMode: "default", autoModeMinutes: 60, permissions: { allow: ["Bash(npm run *)"], ask: [], deny: [] } },
+    builtin: [{ action: "deny", label: "rm -r auf / , ~ oder ein ganzes Systemverzeichnis" }],
+  };
+}
+
 const store = () => (g.__agentDemo ??= seed());
 
+<<<<<<< HEAD
+export function demoAgentRequest(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): AgentReply {
+=======
 export function demoAgentRequest(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): AgentReply {
+>>>>>>> origin/main
   const st = store();
   const url = new URL(path, "http://agent");
   const parts = url.pathname.split("/").filter(Boolean);
   if (parts[0] === "actions") return { status: 200, json: { ok: true } };
+  if (parts[0] === "permissions") return { status: 200, json: demoPermissions(parts[1]) };
   if (parts[0] !== "sessions") return { status: 404, json: { error: "Nicht gefunden" } };
 
   if (parts.length === 1) {
