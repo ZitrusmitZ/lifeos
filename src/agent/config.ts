@@ -116,6 +116,8 @@ const schema = z.object({
   /** Namen aus CODE_REPOS in helper.conf (der Helfer prüft selbst nochmal) */
   AGENT_CODE_REPOS: list("lifeos"),
   /** Status/Ergebnis der Sitzungen (schreibt der Coding-Agent, Gruppe lifeos darf lesen) */
+  /** Berechtigungsregeln (JSON, siehe permissions/policy.ts); leer → `<AGENT_DATA_DIR>/permissions.json` */
+  AGENT_PERMISSIONS_FILE: optional,
   AGENT_CODER_STATE: str("/var/lib/lifeos-coder"),
   /** Freigabe-Socket für Coding-Agents (läuft als anderer Nutzer; Zugriff nur mit Token pro Sitzung) */
   AGENT_CODER_SOCKET: str("/run/lifeos-agent/approve-coder.sock"),

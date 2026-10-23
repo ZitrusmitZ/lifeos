@@ -22,6 +22,7 @@ import { ApprovalBroker, startApprovalServer, type ApprovalEndpoint, type RootRu
 import { CoderSessions } from "./coder/sessions.ts";
 import { execRunner, helperCommand } from "./tools/exec.ts";
 import { ChannelMessenger, pushChatId, WebMessenger } from "./web/messenger.ts";
+import { PermissionPolicy } from "./permissions/policy.ts";
 import { startWebServer } from "./web/server.ts";
 import { freeLlmTranscriber } from "./web/stt.ts";
 
@@ -126,7 +127,8 @@ async function main(): Promise<void> {
         return { code: res.code, output: (res.stdout || res.stderr).slice(-20_000) };
       }
     : undefined;
-  const approvals = new ApprovalBroker(db, tg);
+  const permissions = new PermissionPolicy({ file: cfg.AGENT_PERMISSIONS_FILE ?? path.join(cfg.AGENT_DATA_DIR, "permissions.json"), db });
+  const approvals = new ApprovalBroker(db, tg, Date.now, permissions);
   let coderEndpoint: ApprovalEndpoint | null = null;
   if (cfg.AGENT_CONNECTORS || cfg.AGENT_TASK_SHELL) {
     approvalEndpoint = await startApprovalServer(path.join(cfg.AGENT_DATA_DIR, "approve.sock"), approvals, { runRoot, tools: new ToolGate(db, toolCtx, approvals) }).catch((err) => {
@@ -203,6 +205,7 @@ async function main(): Promise<void> {
   const tick = async () => {
     ticks++;
     if (ticks % 2 === 1) sampler.sample(); // jede Minute
+    permissions.tick();
     await scheduler.tick().catch((err) => log.error("scheduler", (err as Error).message));
     await confirm.sweep().catch((err) => log.error("confirm", (err as Error).message));
     await coder.poll().catch((err) => log.error("coder", (err as Error).message));
@@ -228,8 +231,12 @@ async function main(): Promise<void> {
       gateway,
       web,
       token: cfg.LIFEOS_CRON_TOKEN,
-      status: () => ({ telegram: telegramOn, claude: state.claude, ollama: state.ollama, dryRun: cfg.AGENT_DRY_RUN }),
+      status: () => {
+        const p = permissions.state();
+        return { telegram: telegramOn, claude: state.claude, ollama: state.ollama, dryRun: cfg.AGENT_DRY_RUN, mode: p.mode, autoUntil: p.autoUntil };
+      },
       approvals,
+      permissions,
       coderState: cfg.AGENT_CODER_STATE,
       // unabhängig von ENABLE_FREE_PROVIDER (das betrifft nur Chat-Ersatz): der Key genügt
       stt: cfg.FREE_LLM_KEY

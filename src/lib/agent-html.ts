@@ -17,7 +17,7 @@ export type AgentMessage = {
   updatedAt: number;
 };
 export type AgentSession = { id: number; title: string | null; createdAt: number; updatedAt: number; count: number };
-export type AgentStatus = { telegram: boolean; claude: boolean; ollama: boolean; dryRun: boolean };
+export type AgentStatus = { telegram: boolean; claude: boolean; ollama: boolean; dryRun: boolean; mode?: "default" | "auto" | "readonly"; autoUntil?: number | null };
 
 export type AgentTag = "b" | "i" | "u" | "s" | "code" | "pre";
 export type AgentNode = { type: "text"; text: string } | { type: AgentTag; children: AgentNode[] };

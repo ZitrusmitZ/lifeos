@@ -149,6 +149,20 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX pending_uploads_chat ON pending_uploads (chat_id, created_at);
   `,
+  `
+  -- Berechtigungen (Auto-Modus): automatisch genehmigte/blockierte Aufrufe und Moduswechsel; Befehle sind von Secrets bereinigt
+  CREATE TABLE permission_log (
+    id       INTEGER PRIMARY KEY,
+    at       INTEGER NOT NULL,
+    tool     TEXT NOT NULL,
+    command  TEXT NOT NULL,
+    rule     TEXT NOT NULL,                 -- Regel, die gegriffen hat (z. B. 'Modus auto', 'deny: mkfs', 'allow: Bash(npm run *)')
+    mode     TEXT NOT NULL,                 -- 'default' | 'auto' | 'readonly' zum Zeitpunkt der Entscheidung
+    decision TEXT NOT NULL,                 -- 'auto' | 'allow' | 'deny' | 'mode'
+    chat_id  INTEGER
+  );
+  CREATE INDEX permission_log_at ON permission_log (at);
+  `,
 ];
 
 export type AgentDB = DatabaseSync;
