@@ -47,22 +47,50 @@ export class FreeProvider implements Provider {
     return this.healthy;
   }
 
+  /** `FREE_LLM_MODEL` darf eine Liste sein: `gemini-flash,llama-3.3-70b,auto` – der Reihe nach probiert. */
+  models(): string[] {
+    const list = this.o.model
+      .split(",")
+      .map((m) => m.trim())
+      .filter(Boolean);
+    return list.length ? list : ["auto"];
+  }
+
   async complete(req: CompletionRequest): Promise<CompletionResult> {
     if (!this.o.enabled) throw new ProviderError("FreeLLM ist deaktiviert");
     const started = Date.now();
+    const deadline = started + (req.timeoutMs ?? this.o.timeoutMs);
+    const errors: string[] = [];
+    for (const model of this.models()) {
+      const left = deadline - Date.now();
+      if (left < 1000) break;
+      try {
+        const res = await this.attempt(model, req, left);
+        return { ...res, durationMs: Date.now() - started };
+      } catch (err) {
+        if (!(err instanceof ModelError)) throw err;
+        errors.push(`${model}: ${err.message}`);
+        if (err.fatal) break; // falscher Key – andere Modelle helfen nicht
+      }
+    }
+    throw new ProviderError(`FreeLLM: ${errors.join(" · ").slice(0, 300) || "Zeit abgelaufen"}`);
+  }
+
+  private async attempt(model: string, req: CompletionRequest, timeoutMs: number): Promise<{ text: string; model: string }> {
     let res: Response;
     try {
       res = await this.fetch(`${this.o.url}/v1/chat/completions`, {
         method: "POST",
         headers: this.headers(),
         body: JSON.stringify({
-          model: this.o.model,
+          model,
           max_tokens: 2048,
           messages: [...(req.system ? [{ role: "system", content: req.system }] : []), { role: "user", content: req.prompt }],
         }),
-        signal: AbortSignal.timeout(req.timeoutMs ?? this.o.timeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
+      if ((err as Error).name === "TimeoutError") throw new ModelError("Zeitüberschreitung");
       this.healthy = false;
       throw new ProviderError(`FreeLLM nicht erreichbar: ${(err as Error).message}`);
     }
@@ -73,12 +101,23 @@ export class FreeProvider implements Provider {
     };
     if (!res.ok) {
       const msg = typeof json.error === "string" ? json.error : (json.error?.message ?? `HTTP ${res.status}`);
-      throw new ProviderError(`FreeLLM: ${msg.slice(0, 300)}`);
+      throw new ModelError(msg.slice(0, 200), res.status === 401 || res.status === 403);
     }
     const text = (json.choices?.[0]?.message?.content ?? "").trim();
-    if (!text) throw new ProviderError("FreeLLM: leere Antwort");
+    if (!text) throw new ModelError("leere Antwort");
     // FreeLLMAPI verrät im Header, welcher Anbieter tatsächlich geantwortet hat; sonst das Feld `model`
     const routed = res.headers.get("x-routed-via")?.trim();
-    return { text, model: (routed || json.model || this.o.model).slice(0, 80), durationMs: Date.now() - started };
+    return { text, model: (routed || json.model || model).slice(0, 80) };
+  }
+}
+
+/** Fehler eines einzelnen Modells → nächstes probieren (außer `fatal`). */
+class ModelError extends Error {
+  readonly fatal: boolean;
+
+  constructor(message: string, fatal = false) {
+    super(message);
+    this.name = "ModelError";
+    this.fatal = fatal;
   }
 }
