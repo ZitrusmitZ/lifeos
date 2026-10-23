@@ -39,13 +39,15 @@ export function formatRemaining(ms: number): string {
 
 /** Restzeit des Auto-Modus in ms, tickt jede Sekunde; `onExpire` einmal, wenn sie abläuft. Ohne Auto-Modus `null`. */
 export function useRemaining(autoUntil: number | null | undefined, onExpire?: () => void): number | null {
-  const [now, setNow] = useState(() => Date.now());
+  // erst im Effekt gesetzt: `Date.now()` im Initialzustand wäre beim Prerender ein eingefrorener Wert
+  const [now, setNow] = useState<number | null>(null);
   const expire = useRef(onExpire);
   useEffect(() => {
     expire.current = onExpire;
   });
   useEffect(() => {
     if (!autoUntil) return;
+    const first = setTimeout(() => setNow(Date.now()), 0);
     const t = setInterval(() => {
       const n = Date.now();
       setNow(n);
@@ -54,9 +56,12 @@ export function useRemaining(autoUntil: number | null | undefined, onExpire?: ()
         expire.current?.();
       }
     }, 1000);
-    return () => clearInterval(t);
+    return () => {
+      clearTimeout(first);
+      clearInterval(t);
+    };
   }, [autoUntil]);
-  return autoUntil ? autoUntil - now : null;
+  return autoUntil && now !== null ? autoUntil - now : null;
 }
 
 /** Deutlicher Rand um den ganzen Bildschirm, solange der Auto-Modus läuft */

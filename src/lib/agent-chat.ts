@@ -13,11 +13,7 @@ export type AgentReply = { status: number; json: Record<string, unknown> };
 const TIMEOUT_MS = 10_000;
 const UNREACHABLE: AgentReply = { status: 503, json: { error: "Agent nicht erreichbar" } };
 
-<<<<<<< HEAD
-export function agentRequest(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<AgentReply> {
-=======
-export function agentRequest(method: "GET" | "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<AgentReply> {
->>>>>>> origin/main
+export function agentRequest(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<AgentReply> {
   if (isDemo()) return Promise.resolve(demoAgentRequest(method, path, body));
   const payload = body === undefined ? undefined : JSON.stringify(body);
   return send(method, path, payload === undefined ? undefined : { data: payload, type: "application/json" }, TIMEOUT_MS);
