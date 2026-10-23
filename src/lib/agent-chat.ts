@@ -1,5 +1,6 @@
 import "server-only";
 import { request } from "node:http";
+import { demoAgentRequest } from "@/lib/agent-demo";
 import { env, isDemo } from "@/lib/env";
 
 /**
@@ -13,7 +14,7 @@ const TIMEOUT_MS = 10_000;
 const UNREACHABLE: AgentReply = { status: 503, json: { error: "Agent nicht erreichbar" } };
 
 export function agentRequest(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<AgentReply> {
-  if (isDemo()) return Promise.resolve({ status: 503, json: { error: "Im Demo-Modus ist der Agent nicht verbunden" } });
+  if (isDemo()) return Promise.resolve(demoAgentRequest(method, path, body));
   const { AGENT_SOCKET, CRON_TOKEN } = env();
   if (!CRON_TOKEN) return Promise.resolve({ status: 503, json: { error: "CRON_TOKEN fehlt – Agent-Chat nicht eingerichtet" } });
 

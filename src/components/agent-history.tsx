@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, MessageCircle, Search, SquarePen, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, MessageCircle, Search, SquarePen, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -10,6 +10,8 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import type { AgentSession } from "@/lib/agent-html";
 import { haptic } from "@/lib/haptics";
+import { isFinePointer } from "@/lib/use-fine-pointer";
+import { keyboardFitStyle, useKeyboardInset } from "@/lib/use-keyboard-inset";
 import { cn } from "@/lib/utils";
 
 /**
@@ -153,6 +155,7 @@ function SessionList({ activeId, onDeleted }: { activeId: number | null; onDelet
 
 export function AgentHistory({ activeId }: { activeId: number | null }) {
   const router = useRouter();
+  const kb = useKeyboardInset();
   const [title, setTitle] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -167,6 +170,17 @@ export function AgentHistory({ activeId }: { activeId: number | null }) {
       stop = true;
     };
   }, [activeId]);
+
+  // Am Rechner: Escape geht zurück zur Liste (nicht, wenn ein Menü das Escape schon verbraucht hat)
+  useEffect(() => {
+    if (!activeId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || !isFinePointer()) return;
+      router.push("/agent");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeId, router]);
 
   const create = async () => {
     haptic();
@@ -186,11 +200,6 @@ export function AgentHistory({ activeId }: { activeId: number | null }) {
       <div className={cn(activeId && "hidden desktop:block")}>
         <PageHeader title="Agent" trailing={newButton} />
       </div>
-      {activeId ? (
-        <div className="desktop:hidden">
-          <PageHeader title={title ?? "Unterhaltung"} back={{ href: "/agent", label: "Agent" }} trailing={newButton} />
-        </div>
-      ) : null}
       {error ? <p className="text-footnote text-destructive">{error}</p> : null}
       <div className="desktop:grid desktop:grid-cols-[320px_minmax(0,1fr)] desktop:gap-8">
         <aside className={cn(activeId && "hidden desktop:block")}>
@@ -198,12 +207,29 @@ export function AgentHistory({ activeId }: { activeId: number | null }) {
         </aside>
         <section className={cn("min-w-0", !activeId && "hidden desktop:block")} aria-label="Unterhaltung">
           {activeId ? (
-            <AgentConversation
-              key={activeId}
-              sessionId={activeId}
-              autoFocus
-              composerClassName="bottom-[calc(max(0.5rem,env(safe-area-inset-bottom))+72px)] desktop:bottom-0 desktop:pb-4"
-            />
+            // Touch: Vollbild-Spalte (100dvh) über Tab-Leiste und Inhalt, folgt dem Bereich über der Tastatur. Desktop: Spalte neben der Liste.
+            <div
+              data-no-pull
+              style={keyboardFitStyle(kb)}
+              className="fixed inset-x-0 top-0 z-50 flex h-dvh flex-col overscroll-none bg-background pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] desktop:static desktop:z-auto desktop:h-[calc(100dvh-9rem)] desktop:min-h-96 desktop:overscroll-auto desktop:p-0"
+            >
+              <header
+                className={cn(
+                  "grid shrink-0 grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)] items-center gap-2 border-b border-border bg-bar px-1 backdrop-blur-xl backdrop-saturate-150 desktop:hidden",
+                  kb.isOpen ? "pt-0" : "pt-[env(safe-area-inset-top)]",
+                )}
+              >
+                <Link href="/agent" aria-label="Zurück zu allen Unterhaltungen" className="flex min-h-11 max-w-23 items-center text-body text-tint-text active:opacity-60">
+                  <ChevronLeft className="size-6 shrink-0" aria-hidden />
+                  <span className="truncate">Agent</span>
+                </Link>
+                <h1 className="line-clamp-2 min-w-0 py-1 text-center text-body font-semibold break-words">{title ?? "Unterhaltung"}</h1>
+                <div className="flex justify-end">{newButton}</div>
+              </header>
+              <div className="min-h-0 flex-1">
+                <AgentConversation key={activeId} sessionId={activeId} autoFocus />
+              </div>
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-3 rounded-[20px] bg-card px-6 py-16 text-center text-muted-foreground">
               <MessageCircle className="size-8" aria-hidden />

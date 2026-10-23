@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { haptic } from "@/lib/haptics";
+import { useKeyboardInset } from "@/lib/use-keyboard-inset";
 import { capsuleOffset, DRAG_THRESHOLD, tabAt } from "@/lib/tab-bar";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +36,7 @@ function track(nav: HTMLElement) {
 export function BottomNav() {
   const path = usePathname();
   const router = useRouter();
+  const kb = useKeyboardInset();
   const navRef = useRef<HTMLElement>(null);
   const capsuleRef = useRef<HTMLSpanElement>(null);
   const drag = useRef<Drag | null>(null);
@@ -101,6 +103,7 @@ export function BottomNav() {
     <nav
       ref={navRef}
       aria-label="Hauptnavigation"
+      inert={kb.isOpen}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={(e) => end(e, false)}
@@ -111,7 +114,7 @@ export function BottomNav() {
         e.preventDefault();
         e.stopPropagation();
       }}
-      className="fixed inset-x-3 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-30 mx-auto grid max-w-md touch-none grid-cols-5 rounded-full bg-bar p-1 shadow-[0_8px_30px_rgb(0_0_0/0.12)] ring-1 ring-black/5 backdrop-blur-xl backdrop-saturate-150 select-none [-webkit-touch-callout:none] md:max-w-lg desktop:hidden dark:ring-white/10"
+      className={cn("fixed inset-x-3 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-30 mx-auto grid max-w-md touch-none grid-cols-5 rounded-full bg-bar p-1 shadow-[0_8px_30px_rgb(0_0_0/0.12)] ring-1 ring-black/5 backdrop-blur-xl backdrop-saturate-150 select-none [-webkit-touch-callout:none] md:max-w-lg desktop:hidden dark:ring-white/10", "transition-[transform,opacity] duration-200 motion-reduce:transition-none", kb.isOpen && "pointer-events-none translate-y-24 opacity-0")}
     >
       {active >= 0 ? (
         <span

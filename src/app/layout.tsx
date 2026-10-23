@@ -25,6 +25,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   viewportFit: "cover",
+  // Android/Chrome: Tastatur verkleinert den Layout-Viewport; iOS Safari ignoriert das (dort greift use-keyboard-inset). Zoomen bleibt erlaubt.
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f2f2f7" },
     { media: "(prefers-color-scheme: dark)", color: "#000000" },
