@@ -23,6 +23,7 @@ import { CoderSessions } from "./coder/sessions.ts";
 import { execRunner, helperCommand } from "./tools/exec.ts";
 import { ChannelMessenger, pushChatId, WebMessenger } from "./web/messenger.ts";
 import { startWebServer } from "./web/server.ts";
+import { freeLlmTranscriber } from "./web/stt.ts";
 
 /**
  * Einstieg: `node src/agent/main.ts [--dry-run]` (Node ≥ 22.18 entfernt die Typen selbst, kein Build-Schritt).
@@ -230,6 +231,10 @@ async function main(): Promise<void> {
       status: () => ({ telegram: telegramOn, claude: state.claude, ollama: state.ollama, dryRun: cfg.AGENT_DRY_RUN }),
       approvals,
       coderState: cfg.AGENT_CODER_STATE,
+      // unabhängig von ENABLE_FREE_PROVIDER (das betrifft nur Chat-Ersatz): der Key genügt
+      stt: cfg.FREE_LLM_KEY
+        ? freeLlmTranscriber({ url: cfg.FREE_LLM_URL, apiKey: cfg.FREE_LLM_KEY, model: cfg.FREE_LLM_STT_MODEL, timeoutMs: 15_000 })
+        : undefined,
     }).catch((err) => {
       log.warn("web", `Web-Chat nicht gestartet (${cfg.AGENT_WEB_SOCKET}): ${(err as Error).message}`);
       return null;

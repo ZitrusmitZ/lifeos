@@ -1,4 +1,5 @@
 import "server-only";
+import { agentUpload } from "./agent-chat";
 import type { DB } from "./db";
 import { env } from "./env";
 import { assertBudget, recordUsage } from "./openai";
@@ -6,6 +7,8 @@ import { assertBudget, recordUsage } from "./openai";
 /**
  * Spracherkennung für die Island (Laptop): WAV rein, Text raus, über Groq Whisper. Ersetzt das alte VPS-Relay;
  * der Laptop transkribiert bei Fehlern selbst (lokales Whisper), daher keine langen Wiederholungen.
+ * Ohne `GROQ_API_KEY` geht das Audio an den Agenten (`POST /stt`), der FreeLLMAPI auf dem Host fragt – kostenlos,
+ * kein weiterer Schlüssel in dieser .env (der Container erreicht 127.0.0.1:3001 des Hosts nicht selbst).
  */
 
 export const STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
@@ -16,6 +19,8 @@ export const MAX_STT_SECONDS = 30;
 const USD_PER_HOUR = 0.04;
 const MIN_BILLED_S = 10;
 const TIMEOUT_MS = 15_000;
+/** Agent → FreeLLM hat selbst 15 s; etwas Luft für den Socket */
+const FREE_TIMEOUT_MS = 18_000;
 const PROMPT_MAX = 600;
 
 export type SttReply = { status: number; json: Record<string, unknown> };
@@ -46,8 +51,6 @@ export function wavSeconds(buf: Uint8Array): number | null {
 export const sttCostUsd = (seconds: number) => (Math.max(seconds, MIN_BILLED_S) / 3600) * USD_PER_HOUR;
 
 export async function transcribe(db: DB, audio: Uint8Array, opts: { lang?: string | null; prompt?: string | null } = {}, now = Date.now()): Promise<SttReply> {
-  const key = env().GROQ_API_KEY;
-  if (!key) return fail(503, "stt_not_configured", "GROQ_API_KEY fehlt in der LifeOS-.env – bitte lokal transkribieren.");
   if (!audio.length) return fail(400, "bad_audio", "Audio fehlt.");
   if (audio.length > MAX_STT_BYTES) return fail(413, "bad_audio", `Audio größer als ${MAX_STT_BYTES} Byte.`);
   const seconds = wavSeconds(audio);
@@ -55,6 +58,9 @@ export async function transcribe(db: DB, audio: Uint8Array, opts: { lang?: strin
   if (seconds > MAX_STT_SECONDS + 0.5) return fail(413, "bad_audio", `Audio länger als ${MAX_STT_SECONDS} s.`);
   const lang = opts.lang ?? "de";
   if (!/^[a-z]{2,3}$/.test(lang)) return fail(400, "bad_lang", "`lang` muss ein Sprachcode wie „de“ sein.");
+  const prompt = opts.prompt?.trim().slice(0, PROMPT_MAX);
+  const key = env().GROQ_API_KEY;
+  if (!key) return viaFreeLlm(db, audio, lang, prompt, now);
   try {
     assertBudget(db);
   } catch (err) {
@@ -66,7 +72,6 @@ export async function transcribe(db: DB, audio: Uint8Array, opts: { lang?: strin
   form.append("model", STT_MODEL);
   form.append("language", lang);
   form.append("response_format", "json");
-  const prompt = opts.prompt?.trim().slice(0, PROMPT_MAX);
   if (prompt) form.append("prompt", prompt);
 
   const t0 = performance.now();
@@ -95,4 +100,24 @@ export async function transcribe(db: DB, audio: Uint8Array, opts: { lang?: strin
     if (attempt === 0) await new Promise((r) => setTimeout(r, 400));
   }
   return fail(502, "groq_unavailable", `Groq nicht verfügbar (${last}).`);
+}
+
+/** Ohne Groq-Key: FreeLLM über den Agenten. Kostet nichts, wird aber (mit 0 $) in `llm_usage` gezählt. */
+async function viaFreeLlm(db: DB, audio: Uint8Array, lang: string, prompt: string | undefined, now: number): Promise<SttReply> {
+  const query = new URLSearchParams({ lang });
+  if (prompt) query.set("prompt", prompt);
+  const t0 = performance.now();
+  const r = await agentUpload(`/stt?${query}`, audio, "audio/wav", FREE_TIMEOUT_MS);
+  const reason = typeof r.json.error === "string" ? r.json.error : `HTTP ${r.status}`;
+  if (r.status === 200) {
+    const via = typeof r.json.via === "string" && r.json.via ? r.json.via : "whisper";
+    recordUsage(db, { model: `freellm:${via}`, purpose: "stt", input: 0, output: 0, usd: 0 }, now);
+    return { status: 200, json: { text: typeof r.json.text === "string" ? r.json.text : "", ms: Math.round(performance.now() - t0), via } };
+  }
+  // 404: Agent ohne /stt (noch nicht neu gestartet), 503: kein FREE_LLM_KEY oder Agent nicht erreichbar
+  if (r.status === 404 || r.status === 503) {
+    return fail(503, "stt_not_configured", `GROQ_API_KEY fehlt in der LifeOS-.env und FreeLLM über den Agenten geht nicht (${reason}) – bitte lokal transkribieren.`);
+  }
+  console.warn(`[stt] FreeLLM über den Agenten: ${r.status} ${reason}`);
+  return fail(502, "freellm_unavailable", `FreeLLM nicht verfügbar (${reason}).`);
 }
