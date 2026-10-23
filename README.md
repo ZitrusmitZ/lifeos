@@ -150,14 +150,14 @@ sudo bash scripts/install_agent.sh   # idempotent: Node, user `lifeos`, Ollama +
 
 ### FreeLLM fallback (free model pool)
 
-When the Pro quota is exhausted (or Claude isn't logged in), the router answers with an OpenAI-compatible free pool instead of queueing – on the home server that's FreeLLMAPI (`127.0.0.1:3001`, one key for all linked free providers, model `auto`). Chat only: no tools, and connector requests (mail/calendar) still wait in the queue. `/quota` shows its state; the reply notes which provider answered (`X-Routed-Via`).
+When the Pro quota is exhausted (or Claude isn't logged in), the router answers with an OpenAI-compatible free pool instead of queueing – on the home server that's FreeLLMAPI (`127.0.0.1:3001`, one key for all linked free providers; `FREE_LLM_MODEL` is a list tried in order, `auto` last). Chat only: no tools, and connector requests (mail/calendar) still wait in the queue. `/quota` shows its state; the reply notes which provider answered (`X-Routed-Via`).
 
 ```bash
 # /etc/lifeos-agent/agent.env
 ENABLE_FREE_PROVIDER=true
 FREE_LLM_URL=http://127.0.0.1:3001
 FREE_LLM_KEY=<FreeLLMAPI key>
-FREE_LLM_MODEL=auto
+FREE_LLM_MODEL=gemini-flash,deepseek-v4-flash,llama-3.3-70b,auto   # tried in order
 ```
 
 Note: free tiers may use prompts for training – that's why only plain chat goes there.

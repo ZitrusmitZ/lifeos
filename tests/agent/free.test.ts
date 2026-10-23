@@ -72,3 +72,32 @@ describe("FreeLLM-Provider", () => {
     expect(down.available()).toBe(false);
   });
 });
+
+describe("FreeLLM-Modellliste", () => {
+  it("probiert die Modelle der Reihe nach, bis eins antwortet", async () => {
+    const asked: string[] = [];
+    const fetchFn = (async (_url: string, init?: RequestInit) => {
+      const model = JSON.parse(String(init?.body)).model as string;
+      asked.push(model);
+      if (model === "gemini-flash") return Response.json({ error: { message: "rate limit" } }, { status: 429 });
+      if (model === "deepseek-v4-flash") return Response.json({ choices: [{ message: { content: "" } }] });
+      return Response.json({ model, choices: [{ message: { content: "Hallo" } }] });
+    }) as unknown as typeof fetch;
+    const p = new FreeProvider({ ...opts, model: "gemini-flash, deepseek-v4-flash ,llama-3.3-70b,auto", fetchFn });
+    const res = await p.complete({ prompt: "x", model: "ignoriert" });
+    expect(res).toMatchObject({ text: "Hallo", model: "llama-3.3-70b" });
+    expect(asked).toEqual(["gemini-flash", "deepseek-v4-flash", "llama-3.3-70b"]);
+  });
+
+  it("falscher Key → sofort abbrechen statt alle Modelle durchzuprobieren", async () => {
+    const calls: Call[] = [];
+    const p = new FreeProvider({ ...opts, model: "a,b,c", fetchFn: fakeFetch(401, { error: { message: "Invalid API key" } }, calls) });
+    await expect(p.complete({ prompt: "x", model: "a" })).rejects.toThrow(/a: Invalid API key/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("alle scheitern → ProviderError mit allen Gründen", async () => {
+    const p = new FreeProvider({ ...opts, model: "a,b", fetchFn: fakeFetch(429, { error: { message: "limit" } }) });
+    await expect(p.complete({ prompt: "x", model: "a" })).rejects.toThrow("FreeLLM: a: limit · b: limit");
+  });
+});
