@@ -111,6 +111,7 @@ Telegram (long polling – no open port)
 Gateway ──► Router ──► local: Ollama (qwen2.5:3b)        trivial
    │          │        claude: `claude -p` (Pro plan)    simple → haiku · complex → sonnet · hard → opus
    │          │        api:    disabled (interface only)
+   │          │        free:   LiteLLM proxy (free tiers) – only when the Pro quota is empty
    │          ▼
    │      Tools (fixed functions) ── confirm buttons (5 min) ── audit log
    ▼
@@ -119,7 +120,7 @@ Scheduler (agent.db, Europe/Berlin) ──► Telegram
 
 - **Separate host process, same stack.** `src/agent/` is TypeScript run directly by Node ≥ 22.18 (type stripping, no build). It needs `systemctl`, `journalctl` and the `claude` CLI, so it runs as the unprivileged system user `lifeos`, not inside the hardened container. Own SQLite file (`/var/lib/lifeos-agent/agent.db`), same `node:sqlite` + `user_version` migration pattern.
 - **Routing.** Rules first (slash commands, "Status", "Starte Minecraft neu", "Logs von ollama 50", "Erinner mich …") – no model involved. Otherwise the local model returns `{"complexity","needs_tools","category"}` as JSON (invalid → one retry → `complex`) and picks the tier. A failing/empty/slow (> 60 s) local answer escalates one tier. Every decision is logged (message hash, provider, model, reason, duration); `/model` shows the last one.
-- **Claude only via the official CLI.** `claude -p --output-format stream-json --model <alias>` as a subprocess with `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` stripped from its environment. Auth is the CLI's own (`claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN`); the agent never reads the token or `~/.claude/.credentials.json` and never calls the API with it. Usage-limit errors → Telegram notice with reset time, request goes into a persistent queue that runs after the reset, simple questions are answered locally meanwhile ("lokal beantwortet, Qualität eingeschränkt").
+- **Claude only via the official CLI.** `claude -p --output-format stream-json --model <alias>` as a subprocess with `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` stripped from its environment. Auth is the CLI's own (`claude setup-token` → `CLAUDE_CODE_OAUTH_TOKEN`); the agent never reads the token or `~/.claude/.credentials.json` and never calls the API with it. Usage-limit errors → Telegram notice with reset time, request goes into a persistent queue that runs after the reset, simple questions are answered locally meanwhile ("lokal beantwortet, Qualität eingeschränkt"). With FreeLLM enabled (below), every non-connector request is answered right away by the free pool instead of being queued.
 - **Server actions.** Typed tools only – no free shell, no `shell=True`, no string-built commands. Changes go through a root-owned helper (`deploy/agent/helper.sh`) that re-checks every verb and name against `/etc/lifeos-agent/helper.conf`; sudoers allows `lifeos` exactly that helper. Content from logs, Notion or the calendar is shown as data and never triggers a tool.
 
 | Tool | Confirmation |
@@ -129,7 +130,8 @@ Scheduler (agent.db, Europe/Berlin) ──► Telegram
 | `service_restart`, `minecraft_say`, `minecraft_restart`, `backup_run`, `git_pull_project` | **yes** – exact command in the preview |
 | `pihole_status`, `nextcloud_status` – via `GET /api/jobs/homeserver` (LifeOS holds the credentials) | no |
 | `pihole_pause` (1–1440 min or until re-enabled), `pihole_resume`, `pihole_domain` (allow/deny, add/remove), `pihole_gravity` – via `POST /api/jobs/homeserver` | **yes** – exact change in the preview |
-| `run_task` – delegates to `claude -p` with `Read/Glob/Grep/Edit/Write` (no shell) in `/var/lib/lifeos-agent/workspace` | **yes** – with Claude's plan as preview |
+| `lifeos_deploy` – "deploy", "neues Update einspielen": `git pull` in `/opt/lifeos`, waits for the GHCR image `sha-<commit>`, checks its revision label, pins it by digest in `compose.override.yaml`, `docker compose up --force-recreate`, waits for healthy (rolls the pin back otherwise), then updates the agent via `install_agent.sh` in a transient systemd unit; after its restart the agent reports back in the same chat | **yes** – pending commits + image status in the preview |
+| `run_task` ("Aufgabe: …") – delegates to `claude -p` with `Read/Glob/Grep/Edit/Write` in the workspace plus `AGENT_FILE_DIRS` (`.env`/credentials denied); with `AGENT_TASK_SHELL=true` also `Bash` as user `lifeos` | **yes** – plan as preview; then **every** shell command needs its own tap (same approval path as connectors) |
 
 **Default jobs** (each switchable in `agent.env`): morning briefing weekdays 06:30 / weekends 09:00 (Notion "today" + overdue tasks by priority, today's calendar events via `GET /api/jobs/agent-briefing`, one server line only if something is off – missing integrations are skipped with a hint); health check every 15 min that only messages on problems (disk > 85 %, RAM > 90 % for > 10 min, service/Minecraft down, CPU > 80 °C; max once per hour per problem) plus a 21:00 summary; study reminder Mon–Thu 16:30. Jobs survive restarts; a missed run is caught up once if it is at most 1 h old.
 
@@ -145,6 +147,16 @@ sudo bash scripts/install_agent.sh   # idempotent: Node, user `lifeos`, Ollama +
 4. **Notion (optional):** create an internal integration at notion.so/profile/integrations, connect it to the task database (… → Connections), set `NOTION_TOKEN` and `NOTION_TASKS_DB_ID` (the 32-char ID in the database URL). Property names are configurable (`NOTION_PROP_*`).
 5. **Calendar (optional):** `LIFEOS_CRON_TOKEN` is copied from `/opt/lifeos/.env` by the install script; needs a LifeOS image that includes `/api/jobs/agent-briefing`.
 6. `sudo systemctl restart lifeos-agent` · logs: `journalctl -u lifeos-agent -f` (plus `/var/lib/lifeos-agent/logs/agent.log`) · health: `curl 127.0.0.1:8788/health`.
+
+### FreeLLM fallback (free model pool)
+
+A local [LiteLLM](https://github.com/BerriAI/litellm) proxy (`deploy/litellm/`, container `litellm`, `127.0.0.1:4000` only, image pinned by digest) bundles the free tiers of Groq, Gemini, Cerebras and OpenRouter `:free` into one model group `free` and fails over on 429s. When the Pro quota is exhausted (or Claude isn't logged in), the router answers with it instead of queueing – chat only: no tools, and connector requests (mail/calendar) still wait in the queue.
+
+```bash
+sudo bash scripts/install_litellm.sh   # creates /etc/litellm/litellm.env – add at least one free key, run again
+```
+
+The script generates `config.yaml` from `deploy/litellm/models.txt` (only providers with a key), starts the container, sends a probe request and enables `ENABLE_FREE_PROVIDER`/`FREE_LLM_KEY` in `agent.env`. `/quota` shows its state. Note: free tiers may use prompts for training – that's why only plain chat goes there.
 
 ### Connectors (Gmail, Calendar, Notion, Composio …)
 

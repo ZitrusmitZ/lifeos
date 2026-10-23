@@ -28,6 +28,11 @@ export function prettyToolName(name: string): string {
 }
 
 export function approvalPreview(tool: string, input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>;
+  if (tool === "Bash" && typeof i.command === "string") {
+    const why = typeof i.description === "string" ? `\n<i>${escapeHtml(i.description.slice(0, 200))}</i>` : "";
+    return `<b>Befehl auf dem Homeserver</b> (Nutzer lifeos)${why}\n<pre>${escapeHtml(i.command.slice(0, PREVIEW_MAX))}</pre>`;
+  }
   let json = JSON.stringify(input ?? {}, null, 2);
   if (json.length > PREVIEW_MAX) json = `${json.slice(0, PREVIEW_MAX)}\n…`;
   return `<b>${escapeHtml(prettyToolName(tool))}</b>\n<pre>${escapeHtml(json)}</pre>`;
