@@ -53,6 +53,33 @@ export function normalize(text: string): string {
     .join(" ");
 }
 
+// ---------- Kettensprache („Öffne Spotify und stell danach die Lautstärke auf 100 %“) ----------
+// Gleiche Regel wie die Island (`computah/router/vocab.py` `split_chain`): harte Fugen („danach“, „dann“, „;“, Satzende)
+// trennen immer; ein bloßes „und“/Komma nur, wenn jede Seite für sich ein Befehl ist („spiel Rock und Pop“ bleibt eins).
+// Getrennt wird nur, wenn mindestens ein Schritt ein bekannter Befehl ist – Fragen mit „dann“ bleiben ganz.
+const HARD = /\s*(?:;|(?<=[.!?])\s+|,?\s*\b(?:und\s+)?(?:danach|anschlie(?:ß|ss)end|dann|zuletzt|als\s+n(?:ä|ae)chstes)\b,?)\s*/iu;
+const INVERTED = /(?:,\s*(?:und\s+)?|\s+und\s+)(\S+)\s+(?:danach|anschlie(?:ß|ss)end|dann)\b,?\s*/giu;
+const SOFT = /\s*(?:,\s*und|,|\bund\b)\s*/iu;
+const EDGE = /^(?:und\b|[,\s])+|(?:[,;.!?]|\s)+$/giu;
+
+const clean = (part: string) => part.replace(EDGE, "").trim();
+const splitBy = (text: string, re: RegExp) => text.split(new RegExp(re.source, re.flags.replace("g", "") + "g")).map(clean).filter(Boolean);
+
+/** Die Schritte eines Satzes in Reihenfolge; `[text]`, wenn es ein Auftrag ist. `isCommand(step)`: Schritt allein bekannt? */
+export function splitChain(text: string, isCommand?: (step: string) => boolean): string[] {
+  const whole = text.trim();
+  const steps: string[] = [];
+  for (const piece of splitBy(whole.replace(INVERTED, "; $1 "), HARD)) {
+    const soft = splitBy(piece, SOFT);
+    if (soft.length > 1 && isCommand && soft.every(isCommand)) steps.push(...soft);
+    else steps.push(piece);
+  }
+  if (steps.length < 2) return whole ? [whole] : [];
+  if (isCommand && !steps.some(isCommand)) return [whole];
+  if (steps.some((p) => fold(p).split(" ").length < 2 && !isCommand?.(p))) return [whole];
+  return steps;
+}
+
 /** Ähnlichkeit 0–100 wie rapidfuzz `ratio` (Indel-Distanz über die LCS). */
 export function ratio(a: string, b: string): number {
   if (!a.length && !b.length) return 100;

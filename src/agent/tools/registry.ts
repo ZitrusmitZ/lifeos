@@ -11,6 +11,7 @@ import { formatSystemStatus, readSystemStatus } from "./system.ts";
 import { today } from "../../lib/time.ts";
 import { HOMESERVER_TOOLS } from "./homeserver.ts";
 import { CODER_TOOLS } from "./coder.ts";
+import { readPage, searchWeb } from "./web.ts";
 import type { CoderSessions } from "../coder/sessions.ts";
 
 /**
@@ -229,6 +230,31 @@ export const TOOLS = [
     },
   }),
   ...CODER_TOOLS,
+  defineTool({
+    name: "web_read",
+    kind: "read",
+    description: "Öffentliche Webseite mit Obscura (Headless-Browser) öffnen und ihren Text lesen",
+    params: z.object({ url: z.string().min(3).max(2000) }),
+    preview: (p) => `Seite lesen: ${escapeHtml(p.url)}`,
+    async run(p, ctx) {
+      const page = await readPage(ctx.run, ctx.cfg.OBSCURA_BIN, p.url);
+      const excerpt = page.text.length > 1500 ? `${page.text.slice(0, 1500)}…` : page.text;
+      return `🌐 <a href="${escapeHtml(page.url)}">${escapeHtml(page.title)}</a>\n<blockquote expandable>${escapeHtml(excerpt)}</blockquote>`;
+    },
+  }),
+  defineTool({
+    name: "web_search",
+    kind: "read",
+    description: "Im Netz suchen (DuckDuckGo über Obscura) – die ersten Treffer mit Link",
+    params: z.object({ query: z.string().min(1).max(300) }),
+    preview: (p) => `Im Netz suchen: ${escapeHtml(p.query)}`,
+    async run(p, ctx) {
+      const hits = await searchWeb(ctx.run, ctx.cfg.OBSCURA_BIN, p.query);
+      if (!hits.length) return `🔎 Nichts gefunden zu „${escapeHtml(p.query)}“.`;
+      return [`🔎 <b>${escapeHtml(p.query)}</b>`, ...hits.map((h, i) =>
+        `${i + 1}. <a href="${escapeHtml(h.url)}">${escapeHtml(h.title)}</a>${h.snippet ? `\n${escapeHtml(h.snippet.slice(0, 220))}` : ""}`)].join("\n\n");
+    },
+  }),
   defineTool({
     name: "run_task",
     kind: "change",

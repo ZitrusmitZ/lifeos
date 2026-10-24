@@ -163,6 +163,8 @@ const schema = z.object({
   CLAUDE_MEM_PROJECT: str("luis"),
   /** Luis-Jev: Stufe-0-Vocab-Liste vom Laptop (JSON, vom Skill-Sync geschrieben); fehlt sie, wird wie bisher eingeordnet */
   LUISJEV_FILE: str("/srv/homeserver/agent-skills/luis-jev/luis-jev.json"),
+  /** Obscura (Headless-Browser) für Webseiten lesen und Websuche; fehlt es, sagen web_read/web_search das */
+  OBSCURA_BIN: str("obscura"),
   LIFEOS_CRON_TOKEN: optional,
 });
 

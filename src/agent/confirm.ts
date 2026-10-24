@@ -85,6 +85,11 @@ export class ConfirmFlow {
     this.now = now;
   }
 
+  /** Derselbe Prozess-Starter wie für die Tools (Tests geben einen Fake). */
+  get runner(): ToolCtx["run"] {
+    return this.ctx.run;
+  }
+
   /** Lesende Tools laufen sofort; ändernde bekommen Vorschau + Buttons. */
   async request(chatId: number, toolName: string, rawParams: unknown): Promise<void> {
     const tool = getTool(toolName);
