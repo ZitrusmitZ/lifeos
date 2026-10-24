@@ -6,6 +6,8 @@
 set -euo pipefail
 
 [[ $EUID -eq 0 ]] || { echo "Bitte mit sudo ausführen." >&2; exit 1; }
+# Über `helper deploy-run` startet systemd-run das Skript ohne $HOME – ollama bricht dann mit einer Panic ab.
+export HOME="${HOME:-/root}"
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP=/opt/lifeos-agent

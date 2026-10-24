@@ -149,7 +149,7 @@ case "$verb" in
     docker image prune -f >/dev/null 2>&1 || true
     # Agent-Update außerhalb des Agent-Prozesses (install_agent.sh startet ihn neu) – eigene transiente Unit,
     # 10 s Verzögerung, damit die Antwort noch im Chat ankommt
-    systemd-run --quiet --collect --unit="lifeos-agent-update-$stamp" --on-active=10 /usr/bin/bash "$DEPLOY_DIR/scripts/install_agent.sh"
+    systemd-run --quiet --collect --unit="lifeos-agent-update-$stamp" --on-active=10 -E HOME=/root /usr/bin/bash "$DEPLOY_DIR/scripts/install_agent.sh"
     echo "Agent-Update startet in 10 s (journalctl -u lifeos-agent-update-$stamp)"
     ;;
   root-exec)
