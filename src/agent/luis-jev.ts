@@ -77,8 +77,11 @@ export class LuisJev {
   private compiled: Compiled[] = [];
   private entities = new Map<string, { alias: string; name: string; value: string }[]>();
   private mtime = 0;
+  private readonly file: string;
 
-  constructor(private readonly file: string) {}
+  constructor(file: string) {
+    this.file = file;
+  }
 
   private load(): boolean {
     let m: number;
