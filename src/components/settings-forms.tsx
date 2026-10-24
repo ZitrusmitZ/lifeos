@@ -8,6 +8,7 @@ import {
   deleteMailRuleAction,
   saveBriefingSettingsAction,
   saveWeeklyReviewSettingsAction,
+  saveReadingSettingsAction,
   saveMailProfileAction,
   saveNewCardsAction,
   saveProfileAction,
@@ -252,5 +253,33 @@ export function RuleList({
         </li>
       ))}
     </ul>
+  );
+}
+
+export function ReadingForm({ reading }: { reading: Settings["reading"] }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(saveReadingSettingsAction, null);
+  return (
+    <form action={action} className="space-y-4">
+      <div className="ios-inset-rows -mx-4 border-y border-border [--inset:16px]">
+        <label className="flex min-h-11 items-center gap-3 px-4 py-2">
+          <span className="flex-1 text-body">Tagesziel (Minuten)</span>
+          <Input type="number" name="goalMinutes" min={1} max={600} defaultValue={reading.goalMinutes} required inputMode="numeric" className="w-[6rem] text-right tabular-nums" />
+        </label>
+        <label className="flex min-h-11 items-center gap-3 px-4 py-2">
+          <span className="flex-1 text-body">Erinnern, wenn das Ziel noch offen ist</span>
+          <input type="checkbox" name="reminder" defaultChecked={reading.reminder} className="size-5 accent-tint" {...SWITCH} />
+        </label>
+        <label className="flex min-h-11 items-center gap-3 px-4 py-2">
+          <span className="flex-1 text-body">Uhrzeit</span>
+          <Input type="time" name="time" defaultValue={reading.time} required className="w-[8.5rem] tabular-nums" />
+        </label>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button type="submit" disabled={pending}>
+          Speichern
+        </Button>
+        <Status state={state} />
+      </div>
+    </form>
   );
 }

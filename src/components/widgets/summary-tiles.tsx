@@ -7,6 +7,7 @@ import {
   Heart,
   Inbox,
   Layers,
+  BookOpen,
   Award,
   ListChecks,
   MailCheck,
@@ -29,6 +30,7 @@ import {
   loadNews,
   loadNextcloud,
   loadPihole,
+  loadReading,
   loadSettings,
   loadSpotify,
   loadUntis,
@@ -182,6 +184,22 @@ const SUMMARIES: Record<WidgetId, () => Promise<Summary>> = {
       unit: decks.length ? "fällig" : undefined,
       caption: !decks.length ? "Noch keine Stapel" : due ? `in ${decks.filter((d) => d.due).length} von ${decks.length} Stapeln` : "Alles wiederholt 🎉",
       tone: due >= 50 ? "warning" : "normal",
+    };
+  },
+  async reading() {
+    const s = await loadReading();
+    const left = Math.max(0, s.goalMinutes - s.todayMinutes);
+    return {
+      icon: BookOpen,
+      color: "var(--cat-reading)",
+      title: "Lesen",
+      value: n(s.todayMinutes),
+      unit: `/ ${s.goalMinutes} Min.`,
+      caption: s.done
+        ? `Ziel erreicht${s.streak > 1 ? ` · ${s.streak} Tage in Folge` : ""} 🎉`
+        : s.last
+          ? `noch ${left} Min. · „${s.last.title}“`
+          : "Noch kein Buch – EPUB hochladen",
     };
   },
   async grades() {

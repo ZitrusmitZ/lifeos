@@ -25,6 +25,8 @@ export type Settings = {
   mailApp: MailApp;
   /** Karteikarten: höchstens so viele neue Karten pro Tag */
   newCardsPerDay: number;
+  /** Lesen: Tagesziel in Minuten, tägliche Erinnerung (nur wenn das Ziel noch offen ist) */
+  reading: { goalMinutes: number; reminder: boolean; time: string };
 };
 
 export const DEFAULT_MAIL_PROFILE = `Ich bin Schüler in der Oberstufe (Brandenburg, LK Informatik) und programmiere viel (GitHub, KI-Tools, eigener VPS).
@@ -51,6 +53,7 @@ export function defaultSettings(): Settings {
     weeklyReview: { enabled: true, time: "18:00" },
     mailApp: "mail",
     newCardsPerDay: DEFAULT_NEW_PER_DAY,
+    reading: { goalMinutes: 20, reminder: true, time: "20:00" },
   };
 }
 
@@ -63,6 +66,7 @@ export function getSettings(db: DB): Settings {
       if (r.key === "goals") s.goals = { ...s.goals, ...v };
       else if (r.key === "briefing") s.briefing = { ...s.briefing, ...v };
       else if (r.key === "weeklyReview") s.weeklyReview = { ...s.weeklyReview, ...v };
+      else if (r.key === "reading") s.reading = { ...s.reading, ...v };
       else if (r.key === "dashboard") s.dashboard = normalizeLayout(v);
       else if (r.key in s) (s as Record<string, unknown>)[r.key] = v;
     } catch {

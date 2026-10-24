@@ -2,6 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { connection } from "next/server";
 import { cache } from "react";
+import { readingStats } from "@/lib/books";
 import { db } from "@/lib/db";
 import { env, isDemo } from "@/lib/env";
 import { mailAssistantData, type MailAssistantData } from "@/lib/mail/triage";
@@ -62,6 +63,8 @@ export const cardWindow = cache(async () => {
   const tz = env().APP_TZ;
   return { now, end: dayEnd(now, tz), newLeft: newCardsLeft(db(), now, tz, (await loadSettings()).newCardsPerDay) };
 });
+
+export const loadReading = cache(async () => readingStats(db(), await currentDay()));
 
 export const loadDecks = cache(async () => {
   const { now, end, newLeft } = await cardWindow();

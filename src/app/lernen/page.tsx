@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ChevronRight, Repeat, Zap } from "lucide-react";
+import { BookOpen, ChevronRight, Repeat, Zap } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { SettingsLink } from "@/components/nav";
@@ -221,6 +221,9 @@ export default function LearnPage() {
         title="Lernen"
         trailing={
           <div className="flex items-center gap-2">
+            <Link href="/lesen" aria-label="Lesen" className="grid size-11 place-items-center rounded-full text-tint hover:bg-muted active:bg-muted">
+              <BookOpen className="size-[1.375rem]" aria-hidden />
+            </Link>
             <FocusButton />
             <SettingsLink className="desktop:hidden" />
           </div>

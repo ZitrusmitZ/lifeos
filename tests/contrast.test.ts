@@ -40,7 +40,7 @@ describe.each([
   it("weiße Schrift auf gefüllten Knöpfen ≥ 4,5:1", () => {
     expect(ratio(t["primary-foreground"], t.primary)).toBeGreaterThanOrEqual(4.5);
   });
-  it.each(["tint", "cat-school", "cat-exams", "cat-habits", "cat-weather", "cat-calendar", "cat-mail", "cat-inbox", "cat-health", "cat-github", "cat-cards", "cat-grades"])(
+  it.each(["tint", "cat-school", "cat-exams", "cat-habits", "cat-weather", "cat-calendar", "cat-mail", "cat-inbox", "cat-health", "cat-github", "cat-cards", "cat-grades", "cat-reading"])(
     "Symbolfarbe %s ≥ 3:1 auf der Karte",
     (token) => {
       expect(ratio(t[token], t.card)).toBeGreaterThanOrEqual(3);
