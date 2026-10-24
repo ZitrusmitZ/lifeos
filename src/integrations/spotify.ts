@@ -5,7 +5,8 @@ import { IntegrationError, type Integration } from "./core";
 
 // Nur Endpunkte, die Spotify-Apps im Development Mode seit Februar 2026 noch nutzen dürfen
 // (kein popularity/followers, keine Batch-Endpunkte).
-export const SPOTIFY_SCOPES = ["user-read-currently-playing", "user-read-recently-played", "user-top-read"];
+// playlist-read-private: Luis' Playlists für die Island („Spiel die Playlist …“ → spotify:playlist:-Deeplink, ohne Klicken)
+export const SPOTIFY_SCOPES = ["user-read-currently-playing", "user-read-recently-played", "user-top-read", "playlist-read-private", "playlist-read-collaborative"];
 
 export type Track = { name: string; artists: string; album: string; image: string | null; url: string };
 export type SpotifyData = {
@@ -83,6 +84,20 @@ async function api<T>(path: string, token: string): Promise<T | null> {
   if (res.status === 204) return null; // gerade nichts abgespielt
   if (!res.ok) throw new IntegrationError(`Spotify antwortet mit ${res.status}`);
   return (await res.json()) as T;
+}
+
+export type Playlist = { name: string; uri: string };
+
+/** Alle eigenen und gefolgten Playlists (Name + spotify:-URI), seitenweise zu je 50, höchstens 500. */
+export async function spotifyPlaylists(): Promise<Playlist[]> {
+  const token = await accessToken();
+  const out: Playlist[] = [];
+  for (let offset = 0; offset < 500; offset += 50) {
+    const page = await api<{ items: ({ name: string; uri: string } | null)[]; next: string | null }>(`/me/playlists?limit=50&offset=${offset}`, token);
+    for (const p of page?.items ?? []) if (p?.name && p.uri) out.push({ name: p.name, uri: p.uri });
+    if (!page?.next) break;
+  }
+  return out;
 }
 
 export const spotify: Integration<SpotifyData> = {
