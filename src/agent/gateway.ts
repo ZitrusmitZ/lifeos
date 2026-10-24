@@ -381,7 +381,7 @@ export class Gateway {
     // Stufe 2: lokale Klassifikation
     const stopTyping = this.keepTyping(chatId);
     try {
-      const agent = this.d.agent?.enabled() && !quotaBlockedUntil(this.d.db, this.now()) ? this.d.agent : null;
+      const agent = this.agentNow();
       // laufende Agent-Sitzung: alles dorthin (auch „ja, mach das“)
       if (agent?.active(chatId)) return await this.agentAnswer(agent, chatId, text, null, "laufende Agent-Sitzung");
       const { c, reason } = await this.d.router.classify(text);
@@ -468,7 +468,7 @@ export class Gateway {
       return false;
     }
     if (r.tier === 2) {
-      const agent = this.d.agent?.enabled() && !quotaBlockedUntil(this.d.db, this.now()) ? this.d.agent : null;
+      const agent = this.agentNow();
       const c: Classification = { complexity: "simple", needs_tools: true, category: r.intent?.startsWith("school") ? "apps" : "chat" };
       if (agent) {
         await this.agentAnswer(agent, chatId, text, c, `Luis-Jev Stufe 2 ${r.intent ?? ""}`, this.d.cfg.CLAUDE_MODEL_SIMPLE);
@@ -497,7 +497,18 @@ export class Gateway {
     await this.d.tg.send(chatId, answer.notice ? `${body}\n\n<i>${escapeHtml(answer.notice)}</i>` : body);
   }
 
-  /** Agent-Modus; bei leerem Kontingent weiter wie bisher (API/FreeLLM/Queue, ohne Werkzeuge). */
+  /**
+   * Agent-Modus, falls nutzbar: mit Pro-Kontingent über Claude, sonst (AGENT_FREE_TOOLS) dieselbe Sitzung über FreeLLM –
+   * mit Werkzeugen. Nur wenn beides nicht geht: null (dann werkzeuglose Antwort).
+   */
+  private agentNow(): AgentMode | null {
+    const a = this.d.agent;
+    if (!a) return null;
+    if (a.enabled() && !quotaBlockedUntil(this.d.db, this.now())) return a;
+    return a.freeEnabled() ? a : null;
+  }
+
+  /** Agent-Modus; Kontingent leer → FreeLLM mit Werkzeugen, erst wenn das auch scheitert ohne Werkzeuge (API/FreeLLM/Queue). */
   private async agentAnswer(agent: AgentMode, chatId: number, text: string, c: Classification | null, reason: string, modelOverride?: string): Promise<void> {
     const cfg = this.d.cfg;
     const model = modelOverride ?? (c?.complexity === "hard" ? cfg.CLAUDE_MODEL_HARD : cfg.CLAUDE_MODEL_COMPLEX);
@@ -522,15 +533,18 @@ export class Gateway {
         const block = fresh ? await m.context(chatId, text, true) : await m.recall(text, 3).then((r) => (r ? `Erinnerungen (claude-mem):\n${r}` : ""));
         if (block) prompt = `<kontext>\n${block}\n</kontext>\n\nNachricht von Luis: ${text}`;
       }
-      const res = await agent.answer(chatId, prompt, model);
-      logDecision(this.d.db, text, decision(true, ""), this.now());
-      log.info("router", `${msgHash(text)} → Agent ${model} (${reason}) ${this.now() - started} ms`);
-      await this.d.tg.send(chatId, markdownToHtml(res.text));
+      const viaFree = !agent.enabled() || quotaBlockedUntil(this.d.db, this.now()) !== null;
+      const res = await this.agentRun(agent, chatId, prompt, model, viaFree);
+      logDecision(this.d.db, text, { ...decision(true, res.free ? "; über FreeLLM mit Werkzeugen" : ""), ...(res.free ? { provider: "free" as const, model: res.model } : {}) }, this.now());
+      log.info("router", `${msgHash(text)} → Agent ${res.model} (${reason}) ${this.now() - started} ms`);
+      const note = res.free ? `\n\n<i>${escapeHtml(`ℹ️ Pro-Kontingent leer – Agent arbeitet über FreeLLM (${this.d.cfg.AGENT_FREE_MODEL}) mit allen Werkzeugen weiter`)}</i>` : "";
+      await this.d.tg.send(chatId, markdownToHtml(res.text) + note);
+      // gleiche CLI-Sitzung, nur anderes Backend: kein „fremder“ Zug, Claude setzt sie später ohne Kontextverlust fort
       await this.rememberTurn(chatId, text, res.text, "claude");
     } catch (err) {
-      if (err instanceof QuotaError) {
-        markQuotaExhausted(this.d.db, err.resetAt, this.now());
-        logDecision(this.d.db, text, decision(false, "; Kontingent leer"), this.now());
+      if (err instanceof QuotaError || (err instanceof ProviderError && /^FreeLLM-Agent/.test(err.message))) {
+        if (err instanceof QuotaError) markQuotaExhausted(this.d.db, err.resetAt, this.now());
+        logDecision(this.d.db, text, decision(false, err instanceof QuotaError ? "; Kontingent leer" : `; ${err.message.slice(0, 200)}`), this.now());
         const cls = c ?? { complexity: "complex" as const, needs_tools: false, category: "chat" as const };
         const remembered = await this.d.memory?.context(chatId, text, true);
         const answer = await this.d.router.answer(chatId, text, cls, `${reason}; Agent: Kontingent leer`, { context: remembered || undefined });
@@ -546,6 +560,22 @@ export class Gateway {
       }
       throw err;
     }
+  }
+
+  /** Ein Agent-Lauf; meldet Claude ein leeres Kontingent, dieselbe Anfrage gleich noch einmal über FreeLLM. */
+  private async agentRun(agent: AgentMode, chatId: number, prompt: string, model: string, viaFree: boolean): Promise<{ text: string; model: string; free: boolean }> {
+    if (!viaFree) {
+      try {
+        const res = await agent.answer(chatId, prompt, model);
+        return { text: res.text, model, free: false };
+      } catch (err) {
+        if (!(err instanceof QuotaError) || !agent.freeEnabled()) throw err;
+        markQuotaExhausted(this.d.db, err.resetAt, this.now());
+        log.warn("agent", "Pro-Kontingent leer – gleiche Sitzung über FreeLLM mit Werkzeugen");
+      }
+    }
+    const res = await agent.answer(chatId, prompt, model, { free: true });
+    return { text: res.text, model: res.model, free: true };
   }
 
   /** Termine der nächsten 7 Tage als Daten für die Antwort; fehlt der Kalender, sagt der Text warum. */

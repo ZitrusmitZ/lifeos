@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeArgs, claudeEnv, ClaudeProvider, detectQuota, parseClaudeStream, type ClaudeSpawn } from "@/agent/providers/claude";
+import { claudeArgs, claudeEnv, ClaudeProvider, freeLlmEnv, detectQuota, parseClaudeStream, type ClaudeSpawn } from "@/agent/providers/claude";
 import { ApiProvider } from "@/agent/providers/api";
 import { QuotaError } from "@/agent/providers/types";
 import { agentDb } from "./fakes";
@@ -125,5 +125,23 @@ describe("API-Provider", () => {
   it("ohne Preise verweigert er", () => {
     const p = new ApiProvider(agentDb(), { enabled: true, apiKey: "k", model: "m", monthlyBudgetUsd: 5 });
     expect(p.available()).toBe(false);
+  });
+});
+
+describe("freeLlmEnv (Agent-Modus über FreeLLM)", () => {
+  it("zeigt die CLI auf FreeLLMAPI und lässt kein Abo-Token und keinen fremden Key durch", () => {
+    const env = freeLlmEnv(
+      { PATH: "/usr/bin", CLAUDE_CODE_OAUTH_TOKEN: "abo", ANTHROPIC_API_KEY: "sk", ANTHROPIC_BASE_URL: "https://gateway", FREE_LLM_KEY: "fk", TELEGRAM_BOT_TOKEN: "t" },
+      { url: "http://127.0.0.1:3001/", key: "fk", model: "auto" },
+    );
+    expect(env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:3001");
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("fk");
+    expect(env.ANTHROPIC_MODEL).toBe("auto");
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("auto");
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.FREE_LLM_KEY).toBeUndefined();
+    expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
+    expect(env.PATH).toBe("/usr/bin");
   });
 });

@@ -133,6 +133,13 @@ const schema = z.object({
   AGENT_MODE_TIMEOUT_MS: num(45 * 60_000),
   /** Nach so vielen Minuten Pause beginnt der Chat eine neue Sitzung (sonst wird die alte fortgesetzt) */
   AGENT_SESSION_IDLE_MIN: num(240),
+  /**
+   * Pro-Kontingent leer: dieselbe Sitzung mit denselben Werkzeugen und Freigaben über FreeLLMAPI weiterführen
+   * (Anthropic-kompatibel, wie beim Coding-Agent) statt werkzeuglos zu antworten. Braucht ENABLE_FREE_PROVIDER + FREE_LLM_KEY.
+   */
+  AGENT_FREE_TOOLS: bool(true),
+  /** Modell für den Agent-Modus über FreeLLM (FreeLLMAPI-Router `auto` ist am zuverlässigsten) */
+  AGENT_FREE_MODEL: str("auto"),
 
   // ── Standard-Jobs ─────────────────────────────────────────────────
   AGENT_JOB_BRIEFING: bool(true),
