@@ -1,3 +1,5 @@
+import { LuisJev } from "./luis-jev.ts";
+import { PlanGoal } from "./plan-goal.ts";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { isPrivateBind, loadConfig, type AgentConfig } from "./config.ts";
@@ -142,7 +144,9 @@ async function main(): Promise<void> {
     return null;
   });
   const agent = new AgentMode({ db, cfg, claude, msg: tg });
-  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined, agent });
+  const planGoal = new PlanGoal({ db, cfg, claude, msg: tg });
+  const luisJev = new LuisJev(cfg.LUISJEV_FILE);
+  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined, agent, planGoal, luisJev });
   if (approvalEndpoint && cfg.AGENT_CONNECTORS) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
   const sampler = new MemSampler();
 

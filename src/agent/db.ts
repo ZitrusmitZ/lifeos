@@ -168,6 +168,39 @@ const MIGRATIONS: string[] = [
   ALTER TABLE web_sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE web_sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Stufe 3 (Luis-Jev): erst Plan (Claude im Plan-Modus), dann nach Luis' Freigabe Ausführung mit Ziel und Prüfkriterium
+  CREATE TABLE plans (
+    id          TEXT PRIMARY KEY,           -- 12 Hex-Zeichen (Button-Daten p:<id>:y|n)
+    chat_id     INTEGER NOT NULL,
+    task        TEXT NOT NULL,
+    kind        TEXT NOT NULL DEFAULT 'code', -- code | explainer | research
+    plan        TEXT NOT NULL DEFAULT '',
+    goal        TEXT NOT NULL DEFAULT '',
+    criterion   TEXT NOT NULL DEFAULT '',
+    session_id  TEXT,
+    status      TEXT NOT NULL,              -- planning | waiting | running | done | failed | rejected | queued
+    rounds      INTEGER NOT NULL DEFAULT 0,
+    result      TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+  );
+  CREATE INDEX plans_chat ON plans (chat_id, status);
+  -- Gedächtnis: Profil „Über Luis“ (feste Fakten) und rollierende Zusammenfassung je Unterhaltung
+  CREATE TABLE profile (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    source     TEXT NOT NULL DEFAULT 'luis', -- luis | learned
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE session_summaries (
+    chat_id     INTEGER PRIMARY KEY,
+    summary     TEXT NOT NULL,
+    upto_at     INTEGER NOT NULL,           -- Nachrichten bis hier sind zusammengefasst
+    provider    TEXT NOT NULL,              -- wer zuletzt geantwortet hat (claude | free | local)
+    updated_at  INTEGER NOT NULL
+  );
+  `,
 ];
 
 export type AgentDB = DatabaseSync;

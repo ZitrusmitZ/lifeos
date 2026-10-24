@@ -1,0 +1,1049 @@
+{
+ "verbs": {
+  "play": [
+   "spiel",
+   "spiele",
+   "spiel mal",
+   "abspielen",
+   "leg auf",
+   "leg",
+   "mach an",
+   "mach",
+   "hau rein",
+   "hau",
+   "starte",
+   "start",
+   "play",
+   "lass laufen",
+   "lass",
+   "schmeiß an"
+  ],
+  "pause": [
+   "pause",
+   "pausier",
+   "pausiere",
+   "stopp",
+   "stop",
+   "halt an",
+   "anhalten",
+   "mach pause",
+   "musik aus",
+   "musik stopp"
+  ],
+  "resume": [
+   "weiter",
+   "weiterspielen",
+   "fortsetzen",
+   "mach weiter",
+   "resume",
+   "play"
+  ],
+  "next": [
+   "nächster song",
+   "nächstes lied",
+   "nächster titel",
+   "nächster",
+   "skip",
+   "überspringen",
+   "weiter zum nächsten",
+   "next"
+  ],
+  "previous": [
+   "zurück",
+   "letzter song",
+   "vorheriger song",
+   "vorheriges lied",
+   "vorheriger titel",
+   "previous"
+  ],
+  "again": [
+   "nochmal",
+   "noch mal",
+   "von vorne",
+   "wiederholen",
+   "nochmal von vorne"
+  ],
+  "louder": [
+   "lauter",
+   "mach lauter",
+   "mach mal lauter",
+   "dreh auf",
+   "volume up",
+   "lauter machen"
+  ],
+  "quieter": [
+   "leiser",
+   "mach leiser",
+   "mach mal leiser",
+   "dreh runter",
+   "volume down",
+   "leiser machen"
+  ],
+  "volume_set": [
+   "lautstärke auf",
+   "lautstärke",
+   "volume auf",
+   "mach die lautstärke auf",
+   "stell die lautstärke auf"
+  ],
+  "mute": [
+   "stumm",
+   "ton aus",
+   "mute",
+   "stummschalten",
+   "sei still"
+  ],
+  "unmute": [
+   "ton an",
+   "unmute",
+   "stummschaltung aus"
+  ],
+  "now_playing": [
+   "was läuft gerade",
+   "was läuft",
+   "wie heißt der song",
+   "wie heißt das lied",
+   "welcher song ist das",
+   "was ist das für ein song"
+  ],
+  "like": [
+   "like den song",
+   "like das lied",
+   "gefällt mir",
+   "like",
+   "speicher den song",
+   "zu meinen lieblingssongs"
+  ],
+  "open": [
+   "öffne",
+   "öffnen",
+   "oeffne",
+   "starte",
+   "start",
+   "mach auf",
+   "geh in",
+   "geh auf",
+   "geh zu",
+   "zeig mir",
+   "zeig",
+   "bring hoch",
+   "ruf auf",
+   "open",
+   "launch"
+  ],
+  "switch": [
+   "wechsel zu",
+   "wechsle zu",
+   "wechsel auf",
+   "zurück zu",
+   "geh zurück zu",
+   "switch to",
+   "nach vorne holen"
+  ],
+  "close": [
+   "schließ",
+   "schließe",
+   "mach zu",
+   "beende",
+   "close",
+   "schließen"
+  ],
+  "minimize": [
+   "minimier das",
+   "minimieren",
+   "minimier",
+   "versteck das",
+   "mach klein"
+  ],
+  "browse": [
+   "geh auf",
+   "öffne die seite",
+   "öffne",
+   "ruf auf",
+   "surf auf",
+   "zeig mir die seite"
+  ],
+  "search": [
+   "such nach",
+   "suche nach",
+   "such",
+   "google",
+   "googel",
+   "recherchier kurz",
+   "finde im netz"
+  ],
+  "dnd_on": [
+   "nicht stören an",
+   "bitte nicht stören an",
+   "nicht stören aktivieren",
+   "ruhe bitte"
+  ],
+  "dnd_off": [
+   "nicht stören aus",
+   "bitte nicht stören aus",
+   "nicht stören deaktivieren"
+  ],
+  "focus_on": [
+   "fokusmodus an",
+   "fokus an",
+   "konzentrationsmodus an",
+   "starte fokus"
+  ],
+  "focus_off": [
+   "fokusmodus aus",
+   "fokus aus",
+   "konzentrationsmodus aus",
+   "beende fokus"
+  ],
+  "dark_on": [
+   "dunkelmodus an",
+   "dark mode an",
+   "dunkles design",
+   "mach dunkel"
+  ],
+  "dark_off": [
+   "dunkelmodus aus",
+   "dark mode aus",
+   "helles design",
+   "mach hell"
+  ],
+  "screenshot": [
+   "screenshot",
+   "bildschirmfoto",
+   "mach einen screenshot",
+   "mach ein bildschirmfoto"
+  ],
+  "learn_today": [
+   "was muss ich heute lernen",
+   "was steht zum lernen an",
+   "was soll ich lernen",
+   "was muss ich lernen",
+   "was lerne ich heute"
+  ],
+  "flashcards": [
+   "starte lernkarten",
+   "lernkarten",
+   "karteikarten",
+   "starte karteikarten",
+   "lernkarten starten"
+  ],
+  "quiz": [
+   "frag mich ab in",
+   "frag mich ab",
+   "abfragen in",
+   "abfragen",
+   "quiz mich in",
+   "quiz in"
+  ],
+  "timetable": [
+   "was hab ich",
+   "was habe ich",
+   "welche stunde hab ich jetzt",
+   "welche stunde habe ich jetzt",
+   "stundenplan",
+   "was steht im stundenplan"
+  ],
+  "cancelled": [
+   "fällt was aus",
+   "fällt etwas aus",
+   "fällt heute was aus",
+   "fällt morgen was aus",
+   "gibt es ausfall"
+  ],
+  "subject_when": [
+   "wann hab ich",
+   "wann habe ich"
+  ],
+  "grades": [
+   "wie stehe ich in",
+   "wie steh ich in",
+   "meine noten in",
+   "meine noten",
+   "noten in",
+   "noten"
+  ],
+  "grade_add": [
+   "trag eine",
+   "trage eine",
+   "schreib eine",
+   "notier eine"
+  ],
+  "homework": [
+   "was ist an hausaufgaben offen",
+   "welche hausaufgaben hab ich",
+   "hausaufgaben",
+   "was muss ich noch machen"
+  ],
+  "remind": [
+   "erinnere mich",
+   "erinner mich",
+   "erinnerung",
+   "erstelle eine erinnerung",
+   "mach eine erinnerung"
+  ],
+  "briefing": [
+   "morning brief",
+   "morgenbriefing",
+   "briefing",
+   "bring den morning brief hoch",
+   "zeig den morning brief",
+   "morning intel brief",
+   "bring up the morning intel brief"
+  ],
+  "news": [
+   "was gibt es neues",
+   "was gibts neues",
+   "nachrichten",
+   "news",
+   "was ist neu",
+   "biggest news"
+  ],
+  "weather": [
+   "wetter heute",
+   "wie wird das wetter",
+   "wetter",
+   "wie ist das wetter"
+  ],
+  "code": [
+   "starte eine coding session und",
+   "starte eine coding session",
+   "coding session",
+   "bau mir",
+   "baue mir",
+   "bau",
+   "baue",
+   "programmier",
+   "fix",
+   "fixe",
+   "repariere"
+  ],
+  "explain": [
+   "mach mir einen erklärer zu",
+   "mach mir einen erklärer",
+   "erklärer zu",
+   "erklär mir ausführlich",
+   "make me an explainer"
+  ],
+  "research": [
+   "recherchier",
+   "recherchiere",
+   "mach eine recherche zu",
+   "finde heraus"
+  ],
+  "compare": [
+   "vergleich",
+   "vergleiche",
+   "was ist der unterschied zwischen"
+  ],
+  "agent_status": [
+   "was läuft gerade beim agent",
+   "wie weit ist der agent",
+   "status",
+   "was macht der agent",
+   "was läuft im hintergrund"
+  ],
+  "show_plan": [
+   "zeig den plan",
+   "zeig mir den plan",
+   "plan anzeigen",
+   "öffne den plan"
+  ],
+  "approve": [
+   "gib frei",
+   "freigeben",
+   "passt so",
+   "ja mach",
+   "ausführen",
+   "genehmigt"
+  ],
+  "abort": [
+   "abbrechen",
+   "brich ab",
+   "stopp das",
+   "cancel",
+   "lass es"
+  ]
+ },
+ "entities": {
+  "playlist": {
+   "Hör einfach Pt 2": {
+    "aliases": [
+     "hör einfach part 2",
+     "hör einfach teil 2",
+     "hör einfach pt 2",
+     "hör einfach 2",
+     "hör einfach"
+    ]
+   }
+  },
+  "app": {
+   "Visual Studio Code": {
+    "aliases": [
+     "vs code",
+     "vscode",
+     "code",
+     "visual studio"
+    ]
+   },
+   "Firefox": {
+    "aliases": [
+     "browser",
+     "feuerfuchs"
+    ]
+   },
+   "Spotify": {
+    "aliases": [
+     "musik app"
+    ]
+   },
+   "Dateien": {
+    "aliases": [
+     "nautilus",
+     "datei manager",
+     "dateimanager",
+     "explorer"
+    ]
+   },
+   "Terminal": {
+    "aliases": [
+     "konsole",
+     "ptyxis",
+     "shell"
+    ]
+   }
+  },
+  "site": {
+   "YouTube": {
+    "aliases": [
+     "youtube",
+     "you tube"
+    ],
+    "value": "https://www.youtube.com"
+   },
+   "heise": {
+    "aliases": [
+     "heise.de",
+     "heise online"
+    ],
+    "value": "https://www.heise.de"
+   },
+   "GitHub": {
+    "aliases": [
+     "github",
+     "git hub"
+    ],
+    "value": "https://github.com"
+   },
+   "LifeOS": {
+    "aliases": [
+     "lifeos",
+     "life os",
+     "mein dashboard",
+     "dashboard"
+    ],
+    "value": "https://home.taila65db2.ts.net"
+   },
+   "WebUntis": {
+    "aliases": [
+     "untis",
+     "webuntis",
+     "web untis"
+    ],
+    "value": "https://webuntis.com"
+   },
+   "Claude": {
+    "aliases": [
+     "claude",
+     "claude ai"
+    ],
+    "value": "https://claude.ai"
+   },
+   "Wikipedia": {
+    "aliases": [
+     "wikipedia"
+    ],
+    "value": "https://de.wikipedia.org"
+   }
+  },
+  "day": {
+   "heute": {
+    "aliases": [
+     "heute",
+     "jetzt",
+     "gerade"
+    ]
+   },
+   "morgen": {
+    "aliases": [
+     "morgen"
+    ]
+   },
+   "übermorgen": {
+    "aliases": [
+     "übermorgen"
+    ]
+   },
+   "montag": {
+    "aliases": [
+     "montag",
+     "am montag"
+    ]
+   },
+   "dienstag": {
+    "aliases": [
+     "dienstag",
+     "am dienstag"
+    ]
+   },
+   "mittwoch": {
+    "aliases": [
+     "mittwoch",
+     "am mittwoch"
+    ]
+   },
+   "donnerstag": {
+    "aliases": [
+     "donnerstag",
+     "am donnerstag"
+    ]
+   },
+   "freitag": {
+    "aliases": [
+     "freitag",
+     "am freitag"
+    ]
+   },
+   "diese woche": {
+    "aliases": [
+     "diese woche",
+     "die woche"
+    ]
+   },
+   "nächste woche": {
+    "aliases": [
+     "nächste woche"
+    ]
+   }
+  },
+  "subject": {
+   "Mathe": {
+    "aliases": [
+     "mathe",
+     "mathematik"
+    ]
+   },
+   "Deutsch": {
+    "aliases": [
+     "deutsch"
+    ]
+   },
+   "Englisch": {
+    "aliases": [
+     "englisch",
+     "english"
+    ]
+   },
+   "Biologie": {
+    "aliases": [
+     "bio",
+     "biologie"
+    ]
+   },
+   "Physik": {
+    "aliases": [
+     "physik"
+    ]
+   },
+   "Chemie": {
+    "aliases": [
+     "chemie",
+     "chemi"
+    ]
+   },
+   "Informatik": {
+    "aliases": [
+     "informatik",
+     "info"
+    ]
+   },
+   "Geschichte": {
+    "aliases": [
+     "geschichte",
+     "geschi"
+    ]
+   },
+   "Erdkunde": {
+    "aliases": [
+     "erdkunde",
+     "geografie",
+     "geographie"
+    ]
+   },
+   "Politik": {
+    "aliases": [
+     "politik",
+     "powi",
+     "sozialkunde"
+    ]
+   },
+   "Kunst": {
+    "aliases": [
+     "kunst"
+    ]
+   },
+   "Musik": {
+    "aliases": [
+     "musik"
+    ]
+   },
+   "Sport": {
+    "aliases": [
+     "sport"
+    ]
+   },
+   "Religion": {
+    "aliases": [
+     "religion",
+     "reli",
+     "ethik"
+    ]
+   },
+   "Französisch": {
+    "aliases": [
+     "französisch",
+     "franze"
+    ]
+   },
+   "Spanisch": {
+    "aliases": [
+     "spanisch"
+    ]
+   },
+   "Latein": {
+    "aliases": [
+     "latein"
+    ]
+   }
+  }
+ },
+ "intents": {
+  "music.play_playlist": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "spotify.play_playlist",
+   "patterns": [
+    "<play> [die] [meine] playlist {playlist:playlist}",
+    "<play> [die] [meine] {playlist:playlist} playlist",
+    "<play> [die] [meine] {playlist:playlist}",
+    "leg [die] [meine] [playlist] {playlist:playlist} auf",
+    "mach [die] [meine] [playlist] {playlist:playlist} an",
+    "hau [die] [meine] [playlist] {playlist:playlist} rein",
+    "schmeiß [die] [meine] [playlist] {playlist:playlist} an",
+    "[die] [meine] [playlist] {playlist:playlist} spielen",
+    "[die] [meine] [playlist] {playlist:playlist} abspielen",
+    "[die] [meine] [playlist] {playlist:playlist} anmachen",
+    "[die] [meine] [playlist] {playlist:playlist} auflegen"
+   ]
+  },
+  "music.pause": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "media.pause",
+   "patterns": [
+    "<pause>",
+    "<pause> [die] musik",
+    "[die] musik pausieren",
+    "[die] musik anhalten",
+    "[die] musik stoppen",
+    "[die] musik aus"
+   ]
+  },
+  "music.resume": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "media.play",
+   "patterns": [
+    "<resume>",
+    "<resume> [mit der] musik"
+   ]
+  },
+  "music.next": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "media.next",
+   "patterns": [
+    "<next>"
+   ]
+  },
+  "music.previous": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "media.previous",
+   "patterns": [
+    "<previous>"
+   ]
+  },
+  "music.again": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "media.again",
+   "patterns": [
+    "<again>"
+   ]
+  },
+  "music.now_playing": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "media.now_playing",
+   "patterns": [
+    "<now_playing>"
+   ]
+  },
+  "music.like": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "spotify.like",
+   "patterns": [
+    "<like>"
+   ]
+  },
+  "volume.up": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "volume.up",
+   "patterns": [
+    "<louder>"
+   ]
+  },
+  "volume.down": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "volume.down",
+   "patterns": [
+    "<quieter>"
+   ]
+  },
+  "volume.set": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "volume.set",
+   "patterns": [
+    "<volume_set> {level:number} [prozent]",
+    "<volume_set> {level:number} %"
+   ]
+  },
+  "volume.mute": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "volume.mute",
+   "patterns": [
+    "<mute>"
+   ]
+  },
+  "volume.unmute": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "volume.unmute",
+   "patterns": [
+    "<unmute>"
+   ]
+  },
+  "app.open": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "app.open",
+   "patterns": [
+    "<open> [den] [die] [das] [mir] {app:app}",
+    "mach [den] [die] [das] {app:app} auf",
+    "{app:app} öffnen",
+    "{app:app} starten",
+    "{app:app} auf",
+    "bring [den] [die] [das] {app:app} hoch",
+    "ruf [den] [die] [das] {app:app} auf"
+   ]
+  },
+  "app.switch": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "app.focus",
+   "patterns": [
+    "<switch> [den] [die] [das] {app:app}"
+   ]
+  },
+  "app.close": {
+   "tier": 1,
+   "target": "laptop",
+   "handler": "app.close",
+   "patterns": [
+    "<close> [den] [die] [das] {app:app}",
+    "mach [den] [die] [das] {app:app} zu",
+    "{app:app} schließen"
+   ],
+   "confirm": true
+  },
+  "app.minimize": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "window.minimize",
+   "patterns": [
+    "<minimize>"
+   ]
+  },
+  "web.open": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "web.open",
+   "patterns": [
+    "<browse> [die] [seite] {site:site}",
+    "<open> [die] [seite] {site:site}"
+   ]
+  },
+  "web.search": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "web.search",
+   "patterns": [
+    "<search> {query*}"
+   ]
+  },
+  "desktop.dnd_on": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "desktop.dnd_on",
+   "patterns": [
+    "<dnd_on>"
+   ]
+  },
+  "desktop.dnd_off": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "desktop.dnd_off",
+   "patterns": [
+    "<dnd_off>"
+   ]
+  },
+  "desktop.dark_on": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "desktop.dark_on",
+   "patterns": [
+    "<dark_on>"
+   ]
+  },
+  "desktop.dark_off": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "desktop.dark_off",
+   "patterns": [
+    "<dark_off>"
+   ]
+  },
+  "desktop.screenshot": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "desktop.screenshot",
+   "patterns": [
+    "<screenshot>"
+   ]
+  },
+  "focus.on": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.focus_on",
+   "patterns": [
+    "<focus_on>"
+   ]
+  },
+  "focus.off": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.focus_off",
+   "patterns": [
+    "<focus_off>"
+   ]
+  },
+  "school.learn_today": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<learn_today>"
+   ]
+  },
+  "school.flashcards": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "lifeos.open_page",
+   "patterns": [
+    "<flashcards>",
+    "<flashcards> [in] {subject:subject}"
+   ],
+   "page": "/lernen"
+  },
+  "school.quiz": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<quiz> {subject:subject}",
+    "<quiz>"
+   ]
+  },
+  "school.timetable": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<timetable> {day:day}",
+    "<timetable> [ich] {day:day}",
+    "<timetable>"
+   ]
+  },
+  "school.cancelled": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<cancelled>"
+   ]
+  },
+  "school.subject_when": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<subject_when> {subject:subject}"
+   ]
+  },
+  "school.grades": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<grades> {subject:subject}",
+    "<grades>"
+   ]
+  },
+  "school.grade_add": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<grade_add> {grade:number} in {subject:subject} [ein]",
+    "<grade_add> {grade:number} {subject:subject} [ein]"
+   ],
+   "confirm": true
+  },
+  "school.homework": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<homework>"
+   ]
+  },
+  "reminder.create": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<remind> {task*}"
+   ]
+  },
+  "info.briefing": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "lifeos.open_page",
+   "patterns": [
+    "<briefing>"
+   ],
+   "page": "/briefing"
+  },
+  "info.news": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<news>",
+    "<news> {topic*}"
+   ]
+  },
+  "info.weather": {
+   "tier": 2,
+   "target": "home",
+   "handler": "lifeos.ask",
+   "patterns": [
+    "<weather>",
+    "<weather> {day:day}"
+   ]
+  },
+  "work.code": {
+   "tier": 3,
+   "target": "home",
+   "handler": "lifeos.plan_goal",
+   "patterns": [
+    "<code> {task*}"
+   ],
+   "kind": "code"
+  },
+  "work.explain": {
+   "tier": 3,
+   "target": "home",
+   "handler": "lifeos.plan_goal",
+   "patterns": [
+    "<explain> {topic*}"
+   ],
+   "kind": "explainer"
+  },
+  "work.research": {
+   "tier": 3,
+   "target": "home",
+   "handler": "lifeos.plan_goal",
+   "patterns": [
+    "<research> {topic*}"
+   ],
+   "kind": "research"
+  },
+  "work.compare": {
+   "tier": 3,
+   "target": "home",
+   "handler": "lifeos.plan_goal",
+   "patterns": [
+    "<compare> {topic*}"
+   ],
+   "kind": "research"
+  },
+  "agent.status": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "island.status",
+   "patterns": [
+    "<agent_status>"
+   ]
+  },
+  "agent.show_plan": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "island.show_plan",
+   "patterns": [
+    "<show_plan>"
+   ]
+  },
+  "agent.approve": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "island.approve",
+   "patterns": [
+    "<approve>"
+   ]
+  },
+  "agent.abort": {
+   "tier": 0,
+   "target": "laptop",
+   "handler": "island.abort",
+   "patterns": [
+    "<abort>"
+   ]
+  }
+ }
+}

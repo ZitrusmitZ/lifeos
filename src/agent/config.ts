@@ -155,6 +155,10 @@ const schema = z.object({
   NOTION_DONE_STATUSES: list("Erledigt,Done,Fertig"),
   /** LifeOS-Container für Kalender-Termine (Endpunkt /api/jobs/agent-briefing) */
   LIFEOS_URL: str("http://127.0.0.1:3000"),
+  /** Adresse fürs Handy/Laptop (Links in Telegram) */
+  LIFEOS_PUBLIC_URL: str("https://home.taila65db2.ts.net"),
+  /** Luis-Jev: Stufe-0-Vocab-Liste vom Laptop (JSON, vom Skill-Sync geschrieben); fehlt sie, wird wie bisher eingeordnet */
+  LUISJEV_FILE: str("/srv/homeserver/agent-skills/luis-jev/luis-jev.json"),
   LIFEOS_CRON_TOKEN: optional,
 });
 
