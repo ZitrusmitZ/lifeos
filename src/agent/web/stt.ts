@@ -6,13 +6,13 @@
 
 export type SttOptions = { url: string; apiKey: string; model: string; timeoutMs: number; fetchFn?: typeof fetch };
 export type SttResult = { text: string; via: string | null };
-export type Transcriber = (audio: Uint8Array, opts: { lang: string; prompt?: string }) => Promise<SttResult>;
+export type Transcriber = (audio: Uint8Array, opts: { lang: string; prompt?: string; name?: string; type?: string }) => Promise<SttResult>;
 
 export function freeLlmTranscriber(o: SttOptions): Transcriber {
   const url = `${o.url.replace(/\/$/, "")}/v1/audio/transcriptions`;
-  return async (audio, { lang, prompt }) => {
+  return async (audio, { lang, prompt, name = "audio.wav", type = "audio/wav" }) => {
     const form = new FormData();
-    form.append("file", new Blob([new Uint8Array(audio)], { type: "audio/wav" }), "audio.wav");
+    form.append("file", new Blob([new Uint8Array(audio)], { type }), name);
     form.append("model", o.model);
     form.append("language", lang);
     form.append("response_format", "json");

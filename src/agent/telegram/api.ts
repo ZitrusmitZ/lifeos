@@ -14,6 +14,8 @@ export type TgMessage = {
   caption?: string;
   document?: TgDocument;
   photo?: TgPhotoSize[];
+  /** Sprachnachricht (OGG/Opus) */
+  voice?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
   /** gleiche ID = gemeinsam verschicktes Album (je Datei ein Update) */
   media_group_id?: string;
 };

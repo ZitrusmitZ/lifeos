@@ -1,3 +1,4 @@
+import type { Transcriber } from "./web/stt.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import type { AgentConfig } from "./config.ts";
 import { serviceMap } from "./config.ts";
@@ -123,6 +124,8 @@ export type GatewayDeps = {
   files?: TgFiles;
   /** so lange nach der letzten Telegram-Datei auf weitere warten (Alben kommen als einzelne Updates) */
   fileDebounceMs?: number;
+  /** Spracherkennung (FreeLLM) für Telegram-Sprachnachrichten */
+  stt?: Transcriber;
 };
 
 /** Gesammelte Telegram-Dateien eines Chats, bis keine mehr nachkommt. */
@@ -140,6 +143,8 @@ function fileStamp(ms: number, tz: string): string {
 
 /** Nachrichten, die älter sind (z. B. nach längerem Ausfall), werden nicht mehr ausgeführt. */
 const MAX_MESSAGE_AGE_SEC = 10 * 60;
+/** Sprachnachrichten bis 5 Minuten */
+const MAX_VOICE_SEC = 5 * 60;
 
 export class Gateway {
   private readonly d: GatewayDeps;
@@ -173,13 +178,42 @@ export class Gateway {
       return;
     }
     const hasFile = Boolean(msg.document || msg.photo?.length);
-    if (!msg.text && !hasFile) return;
+    if (!msg.text && !hasFile && !msg.voice) return;
     if (this.now() / 1000 - msg.date > MAX_MESSAGE_AGE_SEC) {
       await this.d.tg.send(msg.chat.id, "⏱ Nachricht war zu alt (Bot war offline) – bitte nochmal schicken.");
       return;
     }
+    if (msg.voice) return this.onVoice(msg);
     if (hasFile) return this.onTelegramFile(msg);
     await this.process(msg.chat.id, msg.text ?? "");
+  }
+
+  /** Sprachnachricht: transkribieren, den erkannten Text zeigen und wie eine getippte Nachricht ausführen. */
+  private async onVoice(msg: TgMessage): Promise<void> {
+    const chatId = msg.chat.id;
+    const voice = msg.voice!;
+    if (!this.d.stt || !this.d.files) {
+      await this.d.tg.send(chatId, "⚠️ Sprachnachrichten verstehe ich gerade nicht (Spracherkennung über FreeLLM fehlt: <code>FREE_LLM_KEY</code>).");
+      return;
+    }
+    if (voice.duration > MAX_VOICE_SEC) {
+      await this.d.tg.send(chatId, `⚠️ Sprachnachricht ist zu lang (max. ${MAX_VOICE_SEC / 60} Min.).`);
+      return;
+    }
+    let text: string;
+    try {
+      const audio = await this.d.files.download(voice.file_id);
+      text = (await this.d.stt(audio, { lang: "de", name: "voice.ogg", type: voice.mime_type ?? "audio/ogg" })).text;
+    } catch (err) {
+      await this.d.tg.send(chatId, `⚠️ Spracherkennung fehlgeschlagen: ${escapeHtml((err as Error).message)}`);
+      return;
+    }
+    if (!text) {
+      await this.d.tg.send(chatId, "🎙 Nichts verstanden – nochmal?");
+      return;
+    }
+    await this.d.tg.send(chatId, `🎙 „${escapeHtml(text)}“`);
+    await this.process(chatId, text);
   }
 
   /**

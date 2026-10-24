@@ -156,7 +156,11 @@ async function main(): Promise<void> {
   } catch {
     // keine Startwerte vorhanden
   }
-  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined, agent, planGoal, luisJev, memory });
+  // unabhängig von ENABLE_FREE_PROVIDER (das betrifft nur Chat-Ersatz): der Key genügt – für /api/stt und Telegram-Sprachnachrichten
+  const stt = cfg.FREE_LLM_KEY
+    ? freeLlmTranscriber({ url: cfg.FREE_LLM_URL, apiKey: cfg.FREE_LLM_KEY, model: cfg.FREE_LLM_STT_MODEL, timeoutMs: 15_000 })
+    : undefined;
+  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined, agent, planGoal, luisJev, memory, stt });
   if (approvalEndpoint && cfg.AGENT_CONNECTORS) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
   const sampler = new MemSampler();
 
@@ -252,10 +256,7 @@ async function main(): Promise<void> {
       approvals,
       permissions,
       coderState: cfg.AGENT_CODER_STATE,
-      // unabhängig von ENABLE_FREE_PROVIDER (das betrifft nur Chat-Ersatz): der Key genügt
-      stt: cfg.FREE_LLM_KEY
-        ? freeLlmTranscriber({ url: cfg.FREE_LLM_URL, apiKey: cfg.FREE_LLM_KEY, model: cfg.FREE_LLM_STT_MODEL, timeoutMs: 15_000 })
-        : undefined,
+      stt,
     }).catch((err) => {
       log.warn("web", `Web-Chat nicht gestartet (${cfg.AGENT_WEB_SOCKET}): ${(err as Error).message}`);
       return null;
