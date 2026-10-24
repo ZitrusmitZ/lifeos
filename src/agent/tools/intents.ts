@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Provider } from "../providers/types.ts";
 import { validateTarget, type Attachment } from "../uploads.ts";
 import { TOOLS } from "./registry.ts";
+import { findUrl } from "./web.ts";
 import { today } from "../../lib/time.ts";
 
 /**
@@ -9,7 +10,7 @@ import { today } from "../../lib/time.ts";
  * Tool-Aufrufe entstehen nur aus Luis' Telegram-Nachricht, nie aus Inhalten von Logs, Notion oder Webseiten.
  */
 
-export type ToolIntent = { tool: string; params: Record<string, unknown> };
+export type ToolIntent = { tool: string; params: Record<string, unknown>; /** web_read: Luis will eine Antwort/Zusammenfassung, nicht den Rohtext */ summarize?: boolean };
 
 const ART = String.raw`(?:den |die |das )?`;
 
@@ -45,6 +46,26 @@ export function matchCalendarIntent(input: string, now: Date = new Date(), tz?: 
   return { tool: "calendar_events", params: range };
 }
 
+/**
+ * Web (Obscura): „lies example.com“, „was steht auf heise.de?“, „fass https://… zusammen“, „such im Netz nach …“,
+ * „google …“. Nur mit erkennbarer Adresse bzw. ausdrücklichem Netz-Bezug – „such meine Datei“ bleibt beim alten Weg.
+ */
+export function matchWebIntent(input: string): ToolIntent | null {
+  const text = input.trim().replace(/\s+/g, " ");
+  const search =
+    text.match(/^(?:such(?:e)?|recherchier(?:e)?|schau)\s+(?:mal\s+)?(?:im|in dem)\s+(?:netz|internet|web)\s+(?:nach\s+)?(.+?)[?.!]*$/i) ??
+    text.match(/^(?:google|websuche:?)\s+(?:mal\s+)?(?:nach\s+)?(.+?)[?.!]*$/i) ??
+    text.match(/^(?:search(?: the web)?(?: for)?)\s+(.+?)[?.!]*$/i);
+  if (search) return { tool: "web_search", params: { query: search[1] } };
+
+  const url = findUrl(text);
+  if (!url) return null;
+  if (/^(?:fass(?:e)?\b.*\bzusammen|was steht (?:auf|in|bei)|worum geht(?:'?s| es)|erkl(?:ä|ae)r(?:e)? mir|summari[sz]e)\b/i.test(text))
+    return { tool: "web_read", params: { url }, summarize: true };
+  if (/^(?:lies|lese|lies mir|öffne|oeffne|zeig(?:e)?(?: mir)?|hol(?:e)?|read|open)\b/i.test(text)) return { tool: "web_read", params: { url } };
+  return null;
+}
+
 /** Freie Fragen mit Kalender-Bezug → Termine als Daten mitgeben („Wann ist mein Zahnarzttermin?“). */
 /** Fragen, für die Claude Luis' verbundene Dienste braucht (Mail, Kalender, Notion, Composio …). */
 export function mentionsApps(text: string): boolean {
@@ -64,6 +85,9 @@ export function matchToolIntent(input: string, knownServices: string[], now: Dat
 
   const calendar = matchCalendarIntent(text, now, tz);
   if (calendar) return calendar;
+
+  const web = matchWebIntent(input);
+  if (web) return web;
 
   if (/^(status|server[- ]?status|serverstatus|wie geht'?s dem server|systemstatus)$/i.test(text)) return { tool: "system_status", params: {} };
 

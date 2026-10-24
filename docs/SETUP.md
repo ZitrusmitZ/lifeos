@@ -243,6 +243,21 @@ Ohne `OPENROUTER_API_KEY` antwortet `/api/jev` mit 503 (`jev_not_configured`). O
 
 Der Feed kommt vom Agenten (`GET /feed` auf dem Web-Socket): nach einem Update des Agenten (`scripts/install_agent.sh`) ist er da; ohne neuen Agenten antwortet `/api/agent/feed` mit 404.
 
+## 10. Obscura (Webseiten lesen und Websuche für den Agenten)
+
+Der Agent liest öffentliche Webseiten und sucht im Netz mit [Obscura](https://github.com/h4ckf0r0day/obscura) – einem Headless-Browser in Rust (V8, ~30 MB RAM, kein Chrome). Erkannt ohne Modell: „lies example.com“, „was steht auf heise.de?“, „fass https://… zusammen“ (Seite als Daten an das Modell, Antwort mit Quelle), „such im Netz nach …“, „google …“. Interne Adressen (LAN, Tailnet `*.ts.net`, `localhost`, private IPs) werden vorher abgelehnt; Obscura sperrt sie zusätzlich selbst.
+
+Einmal auf dem Homeserver installieren (offizielles Release, Version anpassen):
+
+```bash
+cd /tmp && curl -fLO https://github.com/h4ckf0r0day/obscura/releases/download/v0.2.5/obscura-x86_64-linux.tar.gz
+sudo install -d /opt/obscura && sudo tar xzf obscura-x86_64-linux.tar.gz -C /opt/obscura
+sudo ln -sf /opt/obscura/obscura /usr/local/bin/obscura
+obscura fetch https://example.com --dump text | head -3
+```
+
+Der Agent findet es über `PATH` (`/usr/local/bin`); ein anderer Ort geht mit `OBSCURA_BIN=/pfad/zu/obscura` in `agent.env`. Fehlt es, antworten `web_read`/`web_search` mit „Obscura ist auf dem Server nicht installiert“.
+
 ---
 
 ## Betrieb

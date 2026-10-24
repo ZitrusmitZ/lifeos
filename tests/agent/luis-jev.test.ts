@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { LuisJev, normalize, ratio, routingSchema } from "@/agent/luis-jev";
+import { LuisJev, normalize, ratio, routingSchema, splitChain } from "@/agent/luis-jev";
 import { checkPassed, CHECK_PROMPT, goalPrompt, parsePlan, PlanGoal, planPrompt } from "@/agent/plan-goal";
 import { ClaudeProvider, type ClaudeSpawn } from "@/agent/providers/claude";
 import { agentDb, FakeMessenger, LUIS, testConfig, TZ } from "./fakes";
@@ -46,6 +46,22 @@ describe("Luis-Jev Stufe 0 (TS-Port, gleiche Vocab-Liste wie die Island)", () =>
     expect(r).not.toHaveProperty("evil");
     expect(() => routingSchema.parse({ tier: 9 })).toThrow();
   });
+});
+
+describe("Kettensprache (gleiche Regel wie die Island)", () => {
+  const jev = new LuisJev(FIXTURE);
+  const known = (s: string) => Boolean(jev.match(s)) || /lautstärke|öffne/i.test(s);
+  it.each([
+    ["Öffne Spotify und stell danach die Lautstärke auf 100%", ["Öffne Spotify", "stell die Lautstärke auf 100%"]],
+    ["Öffne Spotify und dann Lautstärke 100 %", ["Öffne Spotify", "Lautstärke 100 %"]],
+    ["was muss ich heute lernen und dann was gibts neues", ["was muss ich heute lernen", "was gibts neues"]],
+    ["Öffne Spotify, Lautstärke auf 50 und dann pause", ["Öffne Spotify", "Lautstärke auf 50", "pause"]],
+  ])("%s", (text, steps) => expect(splitChain(text, known)).toEqual(steps));
+
+  it.each(["spiel Rock und Pop", "was passiert dann mit dem Akku", "Schreib Tom und frag ihn dann nach dem Termin"])(
+    "bleibt ganz: %s",
+    (text) => expect(splitChain(text, known)).toEqual([text]),
+  );
 });
 
 describe("Stufe 3: Plan → Freigabe → Goal-Schleife", () => {
