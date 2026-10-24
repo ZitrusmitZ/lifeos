@@ -20,6 +20,7 @@ import { looksLikeSchedule, matchToolIntent, mentionsApps, mentionsCalendar, pic
 import { formatSystemStatus, readSystemStatus } from "./tools/system.ts";
 import type { LuisJev, Routing } from "./luis-jev.ts";
 import type { PlanGoal } from "./plan-goal.ts";
+import type { Memory } from "./memory.ts";
 import { addPending, fileList, hasPending, MAX_UPLOAD_BYTES, mergeAttachments, takePending, UPLOAD_ROOT, type Attachment } from "./uploads.ts";
 import { webChatId } from "./web/messenger.ts";
 import { formatTime, relativeTime, today } from "../lib/time.ts";
@@ -101,6 +102,8 @@ export type GatewayDeps = {
   planGoal?: PlanGoal;
   /** Stufe-0-Vocab-Liste vom Laptop (ordnet Telegram/Web-Chat ohne Modell ein) */
   luisJev?: LuisJev;
+  /** Gedächtnis (Profil, claude-mem, Gesprächsfaden) – für jedes Modell gleich */
+  memory?: Memory;
   now?: () => number;
   /** für Tests (Kalender über LifeOS) */
   fetch?: typeof fetch;
@@ -366,8 +369,11 @@ export class Gateway {
             ? await this.calendarData()
             : undefined;
       const cls = connectors && c.complexity === "trivial" ? { ...c, complexity: "simple" as const } : c;
-      const answer = await this.d.router.answer(chatId, text, cls, connectors ? `${reason}; Connectors` : reason, { context, connectors });
+      const remembered = await this.d.memory?.context(chatId, text, true);
+      const data = [context, remembered].filter(Boolean).join("\n\n") || undefined;
+      const answer = await this.d.router.answer(chatId, text, cls, connectors ? `${reason}; Connectors` : reason, { context: data, connectors });
       await this.sendAnswer(chatId, answer);
+      await this.rememberTurn(chatId, text, answer.text, answer.decision.provider);
     } finally {
       stopTyping();
     }
@@ -414,6 +420,19 @@ export class Gateway {
     return false;
   }
 
+  /** Zug in den Gesprächsfaden; Antworten ohne Claude zusätzlich als Erinnerung (Claude-Sitzungen erfasst das Plugin). */
+  private async rememberTurn(chatId: number, text: string, answer: string, provider: string): Promise<void> {
+    const m = this.d.memory;
+    if (!m) return;
+    try {
+      await m.note(chatId, "user", text);
+      await m.note(chatId, "assistant", answer, provider);
+      if (provider !== "claude" && answer.trim()) void m.remember(`Luis: ${text}\nAgent (${provider}): ${answer.slice(0, 2000)}`, text.slice(0, 80));
+    } catch (err) {
+      log.warn("memory", (err as Error).message);
+    }
+  }
+
   private async sendAnswer(chatId: number, answer: Answer): Promise<void> {
     const body = answer.decision.provider === "local" || answer.queuedId ? escapeHtml(answer.text) : markdownToHtml(answer.text);
     await this.d.tg.send(chatId, answer.notice ? `${body}\n\n<i>${escapeHtml(answer.notice)}</i>` : body);
@@ -434,18 +453,31 @@ export class Gateway {
       ok,
     });
     try {
-      const res = await agent.answer(chatId, text, model);
+      // Gedächtnis: neue oder „fremde“ Sitzung (FreeLLM hat zwischendurch geantwortet) bekommt Profil + Verlauf mit
+      let prompt = text;
+      const m = this.d.memory;
+      if (m) {
+        const foreign = m.foreignSinceClaude(chatId);
+        if (foreign) agent.reset(chatId);
+        const fresh = foreign || agent.session(chatId) === null;
+        const block = fresh ? await m.context(chatId, text, true) : await m.recall(text, 3).then((r) => (r ? `Erinnerungen (claude-mem):\n${r}` : ""));
+        if (block) prompt = `<kontext>\n${block}\n</kontext>\n\nNachricht von Luis: ${text}`;
+      }
+      const res = await agent.answer(chatId, prompt, model);
       logDecision(this.d.db, text, decision(true, ""), this.now());
       log.info("router", `${msgHash(text)} → Agent ${model} (${reason}) ${this.now() - started} ms`);
       await this.d.tg.send(chatId, markdownToHtml(res.text));
+      await this.rememberTurn(chatId, text, res.text, "claude");
     } catch (err) {
       if (err instanceof QuotaError) {
         markQuotaExhausted(this.d.db, err.resetAt, this.now());
         logDecision(this.d.db, text, decision(false, "; Kontingent leer"), this.now());
         const cls = c ?? { complexity: "complex" as const, needs_tools: false, category: "chat" as const };
-        const answer = await this.d.router.answer(chatId, text, cls, `${reason}; Agent: Kontingent leer`);
+        const remembered = await this.d.memory?.context(chatId, text, true);
+        const answer = await this.d.router.answer(chatId, text, cls, `${reason}; Agent: Kontingent leer`, { context: remembered || undefined });
         const notice = [answer.notice, "ohne Werkzeuge, bis das Pro-Kontingent zurück ist"].filter(Boolean).join(" · ");
         await this.sendAnswer(chatId, { ...answer, notice });
+        await this.rememberTurn(chatId, text, answer.text, answer.decision.provider);
         return;
       }
       logDecision(this.d.db, text, decision(false, `; ${(err as Error).message.slice(0, 200)}`), this.now());

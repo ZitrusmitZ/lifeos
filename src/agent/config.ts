@@ -157,6 +157,10 @@ const schema = z.object({
   LIFEOS_URL: str("http://127.0.0.1:3000"),
   /** Adresse fürs Handy/Laptop (Links in Telegram) */
   LIFEOS_PUBLIC_URL: str("https://home.taila65db2.ts.net"),
+  /** Gedächtnis: zentraler claude-mem-Worker auf dem Homeserver (Tailscale, kostenlos über FreeLLM); leer = aus */
+  CLAUDE_MEM_URL: str("http://100.78.247.35:37700"),
+  CLAUDE_MEM_TIMEOUT_MS: num(2500),
+  CLAUDE_MEM_PROJECT: str("luis"),
   /** Luis-Jev: Stufe-0-Vocab-Liste vom Laptop (JSON, vom Skill-Sync geschrieben); fehlt sie, wird wie bisher eingeordnet */
   LUISJEV_FILE: str("/srv/homeserver/agent-skills/luis-jev/luis-jev.json"),
   LIFEOS_CRON_TOKEN: optional,

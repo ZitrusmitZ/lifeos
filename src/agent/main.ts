@@ -1,5 +1,6 @@
 import { LuisJev } from "./luis-jev.ts";
 import { PlanGoal } from "./plan-goal.ts";
+import { Memory } from "./memory.ts";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { isPrivateBind, loadConfig, type AgentConfig } from "./config.ts";
@@ -144,9 +145,10 @@ async function main(): Promise<void> {
     return null;
   });
   const agent = new AgentMode({ db, cfg, claude, msg: tg });
-  const planGoal = new PlanGoal({ db, cfg, claude, msg: tg });
+  const memory = new Memory({ db, cfg, summarizer: cfg.ENABLE_FREE_PROVIDER ? free : local, summarizerModel: cfg.ENABLE_FREE_PROVIDER ? cfg.FREE_LLM_MODEL.split(",")[0] : cfg.OLLAMA_MODEL });
+  const planGoal = new PlanGoal({ db, cfg, claude, msg: tg, remember: (_chat, t) => void memory.remember(t, "Stufe-3-Ergebnis") });
   const luisJev = new LuisJev(cfg.LUISJEV_FILE);
-  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined, agent, planGoal, luisJev });
+  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined, agent, planGoal, luisJev, memory });
   if (approvalEndpoint && cfg.AGENT_CONNECTORS) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
   const sampler = new MemSampler();
 
