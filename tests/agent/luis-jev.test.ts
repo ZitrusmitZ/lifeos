@@ -127,3 +127,12 @@ describe("Stufe 3: Plan → Freigabe → Goal-Schleife", () => {
     expect(tg.sent.at(-1)?.html).toContain("verworfen");
   });
 });
+
+describe("Antwort auf einen wartenden Plan per Text", () => {
+  it("erkennt Freigabe und Verwerfen, alles andere ist ein Änderungswunsch", async () => {
+    const { planAnswer } = await import("@/agent/gateway");
+    for (const t of ["ja", "Freigeben", "gib frei", "passt!", "leg los", "ok"]) expect(planAnswer(t)).toBe("y");
+    for (const t of ["nein", "Abbrechen", "verwerfen", "stopp"]) expect(planAnswer(t)).toBe("n");
+    for (const t of ["ja aber ohne Tests", "Merk dir, dass ich morgen Mathe lerne", "mach es kürzer"]) expect(planAnswer(t)).toBeNull();
+  });
+});

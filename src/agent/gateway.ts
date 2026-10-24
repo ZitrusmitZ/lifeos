@@ -31,6 +31,15 @@ import { formatTime, relativeTime, today } from "../lib/time.ts";
  * Reihenfolge pro Nachricht: Slash-Befehle → Regeln (Tools, Jobs) → lokale Klassifikation → Modell.
  */
 
+const PLAN_YES = /^(ja|jo|ok(ay)?|passt|freigeben|gib (ihn |den plan )?frei|plan freigeben|los|leg los|mach( es| das)?|ausführen|starten?)[.! ]*$/i;
+const PLAN_NO = /^(nein|nö|abbrechen|verwerfen|plan verwerfen|stopp?|lass es|vergiss es)[.! ]*$/i;
+
+/** Kurze Antwort auf einen wartenden Plan: "y", "n" oder null (= Änderungswunsch). */
+export function planAnswer(text: string): "y" | "n" | null {
+  const t = text.trim();
+  return PLAN_YES.test(t) ? "y" : PLAN_NO.test(t) ? "n" : null;
+}
+
 export const HELP = `<b>LifeOS-Agent</b>
 /status – Serverwerte (ohne KI)
 /termine – Kalender der nächsten 7 Tage
@@ -327,9 +336,16 @@ export class Gateway {
   private async onText(chatId: number, text: string, routing?: Routing): Promise<void> {
     if (text.startsWith("/")) return this.onCommand(chatId, text);
 
-    // Stufe 3 wartet auf Freigabe: Text = Plan überarbeiten
+    // Stufe 3 wartet auf Freigabe: „freigeben“/„ja“ startet, „abbrechen“/„nein“ verwirft (auch ohne Knopf, z. B. wenn
+    // Telegram hängt), sonst ist der Text ein Änderungswunsch. Was die Island als Stufe 0–2 eingeordnet hat, ist keiner.
     const waiting = this.d.planGoal?.waiting(chatId);
-    if (waiting) {
+    if (waiting && !(routing && routing.tier < 3)) {
+      const answer = planAnswer(text);
+      if (answer) {
+        this.logRule(text, `Luis-Jev → Plan ${waiting.id} ${answer === "y" ? "freigegeben" : "verworfen"} (per Text)`);
+        await this.d.planGoal!.onCallback(`p:${waiting.id}:${answer}`);
+        return;
+      }
       this.logRule(text, `Luis-Jev → Plan ${waiting.id} überarbeiten`);
       await this.d.planGoal!.revise(waiting, text);
       return;
