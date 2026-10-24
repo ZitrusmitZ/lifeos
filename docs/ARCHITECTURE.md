@@ -51,8 +51,71 @@ SQLite via Node's built-in `node:sqlite` (`src/lib/db.ts`), WAL mode, schema mig
 | `health` | One value per `(day, metric)`; `source` = shortcut / manual / demo |
 | `tokens` | OAuth tokens, AES-256-GCM encrypted (`src/lib/crypto.ts`) |
 | `oauth_state` | One-time `state` values (+ PKCE verifier), expire after 10 min |
+| `settings` | JSON settings per area (dashboard layout, mail assistant, reading goal …) |
+| `push_subscriptions`, `habit_reminders_sent`, `reminders` | Web Push endpoints, sent habit pushes, one-off reminders |
+| `mail_items`, `mail_rules`, `mail_runs`, `drive_items`, `drive_runs`, `llm_usage` | Mail assistant and Drive cleanup: decisions, learned rules, runs, AI cost |
+| `briefings`, `weekly_reviews` | Generated daily briefings and Sunday reviews |
+| `study_materials`, `study_plans`, `study_sessions`, `focus_sessions` | Study plan and measured focus time |
+| `flashcard_sets`, `flashcard_decks`, `flashcards`, `flashcard_reviews` | Flashcards with FSRS state and review log |
+| `grade_courses`, `grades`, `grade_overrides` | Grades per course and semester |
+| `file_shares`, `file_uploads` | Nextcloud share links and chunked uploads |
+| `books` | EPUBs: title, author, spine, TOC, cover path, position (chapter + fraction), percent, opened/finished; the file itself is `DATA_DIR/books/<id>.epub` (0600) |
+| `reading_log` | Active reading seconds per `(day, book_id)` (heartbeat capped at 120 s per report) |
+| `reading_pushes` | One row per day a reading reminder went out (prevents duplicates) |
+
+The agent keeps its own database (`/var/lib/lifeos-agent/agent.db`): `jobs`, `pending_actions`, `audit_log`, `routing_log`, `claude_queue`, `api_usage`, `alert_state`, `health_events`, `coding_sessions`, `plans`, `profile`, `session_summaries`, `pending_uploads`, `permission_log`, `web_sessions`, `web_messages`, `kv`.
 
 Writes go through Server Actions (`src/app/actions.ts`), each input validated with Zod. The health ingest route accepts the messy number formats iOS Shortcuts produce (`"7,5"`, `"8.432"`, lists).
+
+## Routes
+
+| Route | Purpose |
+|---|---|
+| `/api/health` | Docker healthcheck (no identity needed) |
+| `/api/ingest/health` | iPhone Shortcut → Apple Health values (own bearer token) |
+| `/api/auth/[provider]/start`, `…/callback` | OAuth for Google and Spotify |
+| `/api/jobs/*` | Timer/agent jobs with `CRON_TOKEN`: mail triage, clear inbox, agent briefing, homeserver (Pi-hole/Nextcloud) |
+| `/api/mcp`, `/api/mcp/lifeos` | MCP servers: Untis (read-only) and LifeOS (read + write, no deletes) |
+| `/api/agent/*` | Web chat and Island: sessions, actions (buttons), feed, permission mode/log, uploads – proxied to the agent's Unix socket |
+| `/api/jev`, `/api/stt`, `/api/spotify/playlists` | For the Island: TypeSafe Jev relay (OpenRouter), speech-to-text, playlist list |
+| `/api/files/*` | Nextcloud browser: search, preview, raw, shares, chunked upload |
+| `/api/books` (POST), `/api/books/[id]` (DELETE), `/api/books/[id]/progress` (POST), `/api/books/[id]/file/[...path]` (GET) | Reading: upload, delete, position + reading time, book files for the reader |
+| `/lesen/weiter` | Redirect to the last unfinished book (or the library) – target of the reading push and the Island's "weiterlesen" |
+
+## Reader security
+
+EPUB chapters are foreign HTML. They are served by `/api/books/[id]/file/…` straight out of the ZIP (never extracted to disk) with
+`Content-Security-Policy: default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; media-src 'self'; frame-ancestors 'self'; sandbox allow-same-origin`,
+`X-Frame-Options: SAMEORIGIN` and `nosniff`, and shown in an `<iframe sandbox="allow-same-origin">`. So a book can't run scripts, load anything
+from outside or be framed elsewhere. `allow-same-origin` lets the reader page set font and colors, measure the scroll position and intercept links
+(internal → next chapter + anchor, external → new tab). The parser (`src/lib/epub.ts`) rejects paths that leave the archive root and caps
+entry count and uncompressed size (zip-bomb guard); uploads are limited to 50 MB.
+
+## LifeOS, agent and Island
+
+```mermaid
+flowchart LR
+  subgraph Laptop
+    IS["Island (GNOME)<br/>Strg+Alt+Leertaste · Strg+Alt+G Gespräch"]
+    CO["computah<br/>Luis-Jev tier 0/1:<br/>volume, media, apps, AT-SPI"]
+    ID[islandd]
+    IS --> CO
+    CO -- "tier ≥ 2" --> ID
+  end
+  subgraph Home["Home server (Tailscale only)"]
+    APP["LifeOS (Next.js)<br/>/api/agent/* · /api/jev · /api/stt"]
+    AG["LifeOS agent<br/>Gateway: Luis-Jev · tools · approvals<br/>memory · plan + goal loop"]
+    CL["Claude Code (Pro)"]
+    FL["FreeLLMAPI<br/>same session + tools when quota is empty<br/>speech-to-text"]
+    APP -- web.sock --> AG
+    AG --> CL
+    AG -.->|quota empty| FL
+    AG -- MCP --> APP
+  end
+  TG[Telegram<br/>text · files · voice] --> AG
+  WEB[Web chat] --> APP
+  ID -- "sessions · feed · actions" --> APP
+```
 
 ## Deployment
 
