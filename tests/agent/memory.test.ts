@@ -32,6 +32,15 @@ describe("Gedächtnis", () => {
     expect(calls[0]).toMatchObject({ url: "http://mem:37700/api/context/semantic", body: { q: "wann ist die klausur" } });
   });
 
+  it("Startwerte überschreiben nichts, was Luis selbst gesetzt hat", () => {
+    const { mem } = setup();
+    mem.setProfile("Sprache", "Deutsch, du-Form");
+    expect(mem.seedProfile({ Sprache: "Englisch", Ort: "Deutschland", Leer: " " })).toBe(1);
+    expect(mem.profile()).toEqual([{ key: "Ort", value: "Deutschland" }, { key: "Sprache", value: "Deutsch, du-Form" }]);
+    mem.deleteProfile("Ort");
+    expect(mem.profile().map((p) => p.key)).toEqual(["Sprache"]);
+  });
+
   it("remember schickt geschwärzten Text an claude-mem", async () => {
     const { mem, calls } = setup();
     expect(await mem.remember("token=abcdef123456 merken", "t")).toBe(true);
@@ -108,5 +117,22 @@ describe("Kein Kontextverlust beim Wechsel FreeLLM → Claude (Gateway)", () => 
     expect(prompts[0]).toContain("11. Klasse");
     expect(prompts[0]).toContain("Physik-Klausur ist am Donnerstag");
     expect(memory.foreignSinceClaude(LUIS)).toBe(false); // jetzt hat Claude wieder geantwortet
+  });
+});
+
+describe("/profil", () => {
+  it("zeigt, setzt und löscht Profil-Einträge", async () => {
+    const { Gateway } = await import("@/agent/gateway");
+    const { mem } = setup();
+    const gw = Object.create(Gateway.prototype) as InstanceType<typeof Gateway>;
+    (gw as unknown as { d: { memory: Memory } }).d = { memory: mem };
+    expect(gw.profileCommand("")).toContain("Noch nichts");
+    expect(gw.profileCommand("Schule: 10. Klasse")).toContain("Gemerkt");
+    expect(gw.profileCommand("")).toContain("10. Klasse");
+    expect(gw.profileCommand("Passwort: hunter2")).toContain("nie");
+    expect(gw.profileCommand("WLAN-Schlüssel: abc")).toContain("nie");
+    expect(gw.profileCommand("")).not.toContain("hunter2");
+    gw.profileCommand("Schule -");
+    expect(mem.profile()).toEqual([]);
   });
 });

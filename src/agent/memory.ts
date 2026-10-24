@@ -25,6 +25,13 @@ const SECRET = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
 ];
 
+const SECRET_TOPIC = /passw|kennwort|\bpin\b|token|api[-_ ]?key|schl[uü]ssel|secret|geheim|iban|kreditkarte/i;
+
+/** Themen, deren Wert immer ein Geheimnis wäre: werden nie gespeichert. */
+export function secretTopic(key: string): boolean {
+  return SECRET_TOPIC.test(key);
+}
+
 export function redact(text: string): string {
   return SECRET.reduce((t, re) => t.replace(re, (m, word?: string) => (typeof word === "string" ? `${word}: [geschwärzt]` : "[geschwärzt]")), text);
 }
@@ -57,10 +64,29 @@ export class Memory {
   }
 
   // ── Profil ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-  setProfile(key: string, value: string, source: "luis" | "learned" = "luis"): void {
+  setProfile(key: string, value: string, source: "luis" | "learned" = "luis"): boolean {
+    if (secretTopic(key)) return false;
     this.d.db
       .prepare("INSERT INTO profile (key, value, source, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, source = excluded.source, updated_at = excluded.updated_at")
       .run(key, redact(value).slice(0, 2000), source, this.now());
+    return true;
+  }
+
+  deleteProfile(key: string): void {
+    this.d.db.prepare("DELETE FROM profile WHERE key = ?").run(key);
+  }
+
+  /** Startwerte (z. B. aus der alten Persona) übernehmen, ohne von Luis Gesetztes zu überschreiben. */
+  seedProfile(entries: Record<string, string>): number {
+    let n = 0;
+    for (const [key, value] of Object.entries(entries)) {
+      if (typeof value !== "string" || !value.trim() || secretTopic(key)) continue;
+      const r = this.d.db
+        .prepare("INSERT INTO profile (key, value, source, updated_at) VALUES (?, ?, 'learned', ?) ON CONFLICT(key) DO NOTHING")
+        .run(key.slice(0, 60), redact(value).slice(0, 2000), this.now());
+      n += Number(r.changes);
+    }
+    return n;
   }
 
   profile(): { key: string; value: string }[] {

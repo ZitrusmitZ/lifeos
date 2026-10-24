@@ -42,6 +42,7 @@ export const HELP = `<b>LifeOS-Agent</b>
 /quota – Claude-Kontingent und Warteschlange
 /neu – neue Agent-Sitzung (vergisst den bisherigen Verlauf)
 /stop – laufende Agent-Aufgabe abbrechen
+/profil – was ich über dich weiß; /profil &lt;Thema&gt;: &lt;Text&gt; setzt, /profil &lt;Thema&gt; - löscht
 /help – diese Hilfe
 
 Freitext: „Status“, „Termine morgen“, „Starte Minecraft neu“, „Logs von ollama 50“, „Erinner mich …“ – oder einfach eine Aufgabe: „Richte X ein“, „Warum ist Y langsam?“, „Überarbeite die Agent-Seite …“. Der Agent sieht nach, plant und erledigt es; Befehle, root und Änderungen nur nach deinem Klick.`;
@@ -57,6 +58,7 @@ export const COMMANDS = [
   { command: "quota", description: "Claude-Kontingent" },
   { command: "neu", description: "Neue Agent-Sitzung" },
   { command: "stop", description: "Agent-Aufgabe abbrechen" },
+  { command: "profil", description: "Was ich über dich weiß" },
   { command: "help", description: "Hilfe" },
 ];
 
@@ -571,9 +573,32 @@ export class Gateway {
         await this.d.tg.send(chatId, stopped ? "✖️ Wird abgebrochen…" : "Gerade läuft nichts.");
         return;
       }
+      case "profil":
+      case "profile":
+        await this.d.tg.send(chatId, this.profileCommand(arg));
+        return;
       default:
         await this.d.tg.send(chatId, `Unbekannter Befehl. /help`);
     }
+  }
+
+  /** „/profil“ zeigt das Profil, „/profil Schule: 10. Klasse“ setzt, „/profil Schule -“ löscht. */
+  profileCommand(arg: string): string {
+    const memory = this.d.memory;
+    if (!memory) return "Gedächtnis ist aus.";
+    const del = arg.match(/^(.{1,60}?)\s+-$/);
+    if (del) {
+      memory.deleteProfile(del[1].trim());
+      return `🗑 „${escapeHtml(del[1].trim())}“ aus dem Profil entfernt.`;
+    }
+    const set = arg.match(/^([^:]{1,60}):\s*([\s\S]+)$/);
+    if (set) {
+      if (!memory.setProfile(set[1].trim(), set[2].trim())) return "🔒 Passwörter, PINs und Schlüssel speichere ich nie.";
+      return `✅ Gemerkt: <b>${escapeHtml(set[1].trim())}</b>`;
+    }
+    const rows = memory.profile();
+    if (!rows.length) return "Noch nichts im Profil. Beispiel: <code>/profil Schule: 10. Klasse</code>";
+    return `<b>Über dich</b>\n${rows.map((r) => `• <b>${escapeHtml(r.key)}</b>: ${escapeHtml(r.value)}`).join("\n")}`;
   }
 
   jobsText(): string {
