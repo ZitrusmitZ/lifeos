@@ -210,6 +210,12 @@ Browser ─► /api/agent/* (proxy.ts: Tailscale identity + origin check)
 
 **Extending:** a new tool is a `defineTool({...})` entry in `src/agent/tools/registry.ts` (Zod params, `kind: "read" | "change"`, `preview`, `run`) – plus a helper verb in `deploy/agent/helper.sh` if it needs root, and optionally a rule in `tools/intents.ts`. The agent cannot add tools at runtime. A new job type is a runner in `src/agent/main.ts` and an entry in `JobType`; default jobs live in `DEFAULT_JOBS` in `scheduler/scheduler.ts`.
 
+### Luis-Jev-Routing
+
+Ordnet Nachrichten im Agent (Telegram, Web-Chat) in Stufen 0–4 ein, bevor ein Modell gefragt wird. Die Entscheidung der Island vom Laptop (`routing` in der Anfrage, Schema `routingSchema`) wird übernommen; sonst gleicht `LuisJev.match()` den Text mit der Stufe-0-Vocab-Liste ab (Verb-Gruppen, Entitäten, Absichten mit Mustern, Fuzzy-Match für Werte). Absichten mit `confirm` werden dabei nicht automatisch ausgeführt.
+In `Gateway.luisJev()` gilt dann: Stufe 3 startet Plan + Ziel (`src/agent/plan-goal.ts`, Ausführung erst nach Freigabe), Stufe 4 schlägt einen Job vor, Stufe 2 geht als einfache Anfrage an den Agent (`CLAUDE_MODEL_SIMPLE`). Absichten für den Laptop werden nur als Seitenlink bzw. Hinweis beantwortet. Ohne Treffer läuft der normale Weg.
+Code: `src/agent/luis-jev.ts` (Matcher, `routingSchema`), `src/agent/gateway.ts` (Weiterleitung), `src/agent/main.ts` (Verdrahtung), `src/agent/web/server.ts` und `src/app/api/agent/sessions/[id]/route.ts` (`routing` aus der Island). Die Vocab-Liste kommt als JSON vom Laptop (`island/deploy/agent-skills/sync-agent-skills.sh`) und liegt unter `LUISJEV_FILE` (Standard `/srv/homeserver/agent-skills/luis-jev/luis-jev.json`, `src/agent/config.ts`); fehlt die Datei, wird wie bisher eingeordnet.
+
 ## Tech stack
 
 Next.js 16 (App Router, Cache Components, Server Actions) · React 19 · TypeScript · Tailwind CSS 4 · shadcn/ui · Recharts · Zod · `node:sqlite` · Vitest · Playwright · Docker · GitHub Actions · Tailscale
