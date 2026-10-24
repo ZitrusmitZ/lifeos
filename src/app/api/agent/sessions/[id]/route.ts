@@ -23,8 +23,21 @@ const attachment = z.object({
   name: z.string().trim().min(1).max(255),
   size: z.number().int().min(0),
 });
+// Luis-Jev-Entscheidung der Island (Stufe, Absicht, Werte) – der Agent ordnet dann nicht neu ein
+const routing = z
+  .object({
+    tier: z.number().int().min(0).max(4),
+    target: z.enum(["laptop", "home"]).optional(),
+    intent: z.string().max(80).nullish(),
+    handler: z.string().max(80).nullish(),
+    slots: z.record(z.string(), z.union([z.string().max(500), z.number()])).optional(),
+    stage: z.string().max(40).optional(),
+    confidence: z.number().optional(),
+    extra: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strip();
 const sendSchema = z
-  .object({ text: z.string().trim().max(4000), attachments: z.array(attachment).max(10).default([]) })
+  .object({ text: z.string().trim().max(4000), attachments: z.array(attachment).max(10).default([]), routing: routing.optional() })
   .refine((m) => m.text.length > 0 || m.attachments.length > 0);
 
 export async function POST(request: Request, ctx: RouteContext<"/api/agent/sessions/[id]">) {

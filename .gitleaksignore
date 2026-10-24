@@ -1,0 +1,2 @@
+# Falsch-Positive: erfundene Testwerte, die das Schwärzen prüfen (keine echten Schlüssel)
+a3f49d45827db74b662f209d29cf2809b3dc603f:tests/agent/memory.test.ts:generic-api-key:37

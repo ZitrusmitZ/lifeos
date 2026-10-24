@@ -18,6 +18,9 @@ import { calendarContext, CALENDAR_MAX_DAYS, loadCalendar } from "./tools/calend
 import { loadDirs, uploadToInbox } from "./tools/homeserver.ts";
 import { looksLikeSchedule, matchToolIntent, mentionsApps, mentionsCalendar, pickTargetWithLlm, pickToolWithLlm } from "./tools/intents.ts";
 import { formatSystemStatus, readSystemStatus } from "./tools/system.ts";
+import type { LuisJev, Routing } from "./luis-jev.ts";
+import type { PlanGoal } from "./plan-goal.ts";
+import type { Memory } from "./memory.ts";
 import { addPending, fileList, hasPending, MAX_UPLOAD_BYTES, mergeAttachments, takePending, UPLOAD_ROOT, type Attachment } from "./uploads.ts";
 import { webChatId } from "./web/messenger.ts";
 import { formatTime, relativeTime, today } from "../lib/time.ts";
@@ -27,6 +30,15 @@ import { formatTime, relativeTime, today } from "../lib/time.ts";
  * ignoriert (aber geloggt).
  * Reihenfolge pro Nachricht: Slash-Befehle → Regeln (Tools, Jobs) → lokale Klassifikation → Modell.
  */
+
+const PLAN_YES = /^(ja|jo|ok(ay)?|passt|freigeben|gib (ihn |den plan )?frei|plan freigeben|los|leg los|mach( es| das)?|ausführen|starten?)[.! ]*$/i;
+const PLAN_NO = /^(nein|nö|abbrechen|verwerfen|plan verwerfen|stopp?|lass es|vergiss es)[.! ]*$/i;
+
+/** Kurze Antwort auf einen wartenden Plan: "y", "n" oder null (= Änderungswunsch). */
+export function planAnswer(text: string): "y" | "n" | null {
+  const t = text.trim();
+  return PLAN_YES.test(t) ? "y" : PLAN_NO.test(t) ? "n" : null;
+}
 
 export const HELP = `<b>LifeOS-Agent</b>
 /status – Serverwerte (ohne KI)
@@ -39,6 +51,7 @@ export const HELP = `<b>LifeOS-Agent</b>
 /quota – Claude-Kontingent und Warteschlange
 /neu – neue Agent-Sitzung (vergisst den bisherigen Verlauf)
 /stop – laufende Agent-Aufgabe abbrechen
+/profil – was ich über dich weiß; /profil &lt;Thema&gt;: &lt;Text&gt; setzt, /profil &lt;Thema&gt; - löscht
 /help – diese Hilfe
 
 Freitext: „Status“, „Termine morgen“, „Starte Minecraft neu“, „Logs von ollama 50“, „Erinner mich …“ – oder einfach eine Aufgabe: „Richte X ein“, „Warum ist Y langsam?“, „Überarbeite die Agent-Seite …“. Der Agent sieht nach, plant und erledigt es; Befehle, root und Änderungen nur nach deinem Klick.`;
@@ -54,6 +67,7 @@ export const COMMANDS = [
   { command: "quota", description: "Claude-Kontingent" },
   { command: "neu", description: "Neue Agent-Sitzung" },
   { command: "stop", description: "Agent-Aufgabe abbrechen" },
+  { command: "profil", description: "Was ich über dich weiß" },
   { command: "help", description: "Hilfe" },
 ];
 
@@ -95,6 +109,12 @@ export type GatewayDeps = {
   approvals?: ApprovalBroker;
   /** Agent-Modus: Nachrichten als Claude-Sitzung mit Werkzeugen */
   agent?: AgentMode;
+  /** Stufe 3: Plan-Modus, Freigabe, Goal-Schleife */
+  planGoal?: PlanGoal;
+  /** Stufe-0-Vocab-Liste vom Laptop (ordnet Telegram/Web-Chat ohne Modell ein) */
+  luisJev?: LuisJev;
+  /** Gedächtnis (Profil, claude-mem, Gesprächsfaden) – für jedes Modell gleich */
+  memory?: Memory;
   now?: () => number;
   /** für Tests (Kalender über LifeOS) */
   fetch?: typeof fetch;
@@ -165,8 +185,8 @@ export class Gateway {
    * Web-Chat im Dashboard (Unterhaltung `sessionId`). Keine Whitelist: Zugriff regeln Unix-Socket + Token
    * auf Agent-Seite und Tailscale-Identität im Dashboard.
    */
-  async handleWebText(sessionId: number, text: string, attachments: Attachment[] = []): Promise<void> {
-    await this.process(webChatId(sessionId), text, attachments);
+  async handleWebText(sessionId: number, text: string, attachments: Attachment[] = [], routing?: Routing): Promise<void> {
+    await this.process(webChatId(sessionId), text, attachments, false, routing);
   }
 
   /** Button-Klick aus dem Dashboard (`c:<id>:y|n` bzw. `j:<id>:y|n`, gleiche Daten wie bei Telegram). */
@@ -174,13 +194,14 @@ export class Gateway {
     if (data.startsWith("c:")) return this.d.confirm.onCallback(data, "");
     if (data.startsWith("j:")) return this.onJobCallback(data, "");
     if (data.startsWith("a:")) return this.d.approvals?.onCallback(data, "");
+    if (data.startsWith("p:")) return this.d.planGoal?.onCallback(data);
   }
 
   /**
    * `attachments`: gerade hochgeladene Dateien (liegen schon im Agenten-Eingang). Gibt es welche – oder offene von vorher
    * und eine Textnachricht – geht die Nachricht an die Ablage statt an Regeln und Modell. `files`: Telegram-Stapel ohne Text.
    */
-  private async process(chatId: number, text: string, attachments: Attachment[] = [], files = false): Promise<void> {
+  private async process(chatId: number, text: string, attachments: Attachment[] = [], files = false, routing?: Routing): Promise<void> {
     const rl = this.limiter.check(this.now());
     if (rl === "drop") return;
     if (rl === "warn") {
@@ -191,7 +212,7 @@ export class Gateway {
       const t = text.trim();
       if (files || attachments.length || (t && !t.startsWith("/") && hasPending(this.d.db, chatId, this.now()))) {
         await this.onFiles(chatId, t, attachments);
-      } else await this.onText(chatId, t);
+      } else await this.onText(chatId, t, routing);
     } catch (err) {
       log.error("gateway", (err as Error).stack ?? (err as Error).message);
       await this.d.tg.send(chatId, `⚠️ Fehler: ${escapeHtml((err as Error).message)}`).catch(() => undefined);
@@ -305,11 +326,32 @@ export class Gateway {
     if (data.startsWith("c:")) return this.d.confirm.onCallback(data, q.id);
     if (data.startsWith("j:")) return this.onJobCallback(data, q.id);
     if (data.startsWith("a:") && this.d.approvals) return this.d.approvals.onCallback(data, q.id);
+    if (data.startsWith("p:") && this.d.planGoal) {
+      await this.d.tg.answerCallback(q.id, data.endsWith(":y") ? "Freigegeben" : "Verworfen");
+      return this.d.planGoal.onCallback(data);
+    }
     await this.d.tg.answerCallback(q.id, "Unbekannt");
   }
 
-  private async onText(chatId: number, text: string): Promise<void> {
+  private async onText(chatId: number, text: string, routing?: Routing): Promise<void> {
     if (text.startsWith("/")) return this.onCommand(chatId, text);
+
+    // Stufe 3 wartet auf Freigabe: „freigeben“/„ja“ startet, „abbrechen“/„nein“ verwirft (auch ohne Knopf, z. B. wenn
+    // Telegram hängt), sonst ist der Text ein Änderungswunsch. Was die Island als Stufe 0–2 eingeordnet hat, ist keiner.
+    const waiting = this.d.planGoal?.waiting(chatId);
+    if (waiting && !(routing && routing.tier < 3)) {
+      const answer = planAnswer(text);
+      if (answer) {
+        this.logRule(text, `Luis-Jev → Plan ${waiting.id} ${answer === "y" ? "freigegeben" : "verworfen"} (per Text)`);
+        await this.d.planGoal!.onCallback(`p:${waiting.id}:${answer}`);
+        return;
+      }
+      this.logRule(text, `Luis-Jev → Plan ${waiting.id} überarbeiten`);
+      await this.d.planGoal!.revise(waiting, text);
+      return;
+    }
+    // Luis-Jev: Entscheidung der Island übernehmen, sonst die Stufe-0-Vocab-Liste fragen (ohne Modell)
+    if (await this.luisJev(chatId, text, routing)) return;
 
     // Stufe 1: Regeln – ohne LLM
     const intent = matchToolIntent(text, [...serviceMap(this.d.cfg).keys()], new Date(this.now()), this.tz);
@@ -345,10 +387,67 @@ export class Gateway {
             ? await this.calendarData()
             : undefined;
       const cls = connectors && c.complexity === "trivial" ? { ...c, complexity: "simple" as const } : c;
-      const answer = await this.d.router.answer(chatId, text, cls, connectors ? `${reason}; Connectors` : reason, { context, connectors });
+      const remembered = await this.d.memory?.context(chatId, text, true);
+      const data = [context, remembered].filter(Boolean).join("\n\n") || undefined;
+      const answer = await this.d.router.answer(chatId, text, cls, connectors ? `${reason}; Connectors` : reason, { context: data, connectors });
       await this.sendAnswer(chatId, answer);
+      await this.rememberTurn(chatId, text, answer.text, answer.decision.provider);
     } finally {
       stopTyping();
+    }
+  }
+
+  /** true = erledigt. Stufe 3 → Plan+Goal, Stufe 4 → Job, Stufe 2 → schnelle Antwort; Laptop-Absichten gehen nicht hier. */
+  private async luisJev(chatId: number, text: string, routing?: Routing): Promise<boolean> {
+    let r: { tier: number; target: string; intent?: string | null; slots: Record<string, string | number>; kind?: string; page?: string; via: string } | null = null;
+    if (routing) r = { ...routing, kind: routing.extra?.kind as string | undefined, page: routing.extra?.page as string | undefined, via: "island" };
+    else {
+      const m = this.d.luisJev?.match(text);
+      if (m && !m.confirm) r = { tier: m.tier, target: m.target, intent: m.intent, slots: m.slots, kind: m.spec.kind, page: m.spec.page, via: "vocab" };
+    }
+    if (!r) return false;
+    this.logRule(text, `Luis-Jev (${r.via}) → Stufe ${r.tier} ${r.intent ?? ""}`.trim());
+    if (r.tier === 3 && this.d.planGoal && this.d.agent?.enabled()) {
+      await this.d.planGoal.start(chatId, text, r.kind ?? "code");
+      return true;
+    }
+    if (r.tier === 4) {
+      await this.proposeJob(chatId, text);
+      return true;
+    }
+    if (r.target === "laptop") {
+      if (r.page) {
+        await this.d.tg.send(chatId, `🔗 <a href="${escapeHtml(this.d.cfg.LIFEOS_PUBLIC_URL)}${escapeHtml(r.page)}">${escapeHtml(r.page)}</a>`);
+        return true;
+      }
+      if (r.via === "vocab") {
+        await this.d.tg.send(chatId, "💻 Das bediene ich am Laptop – sag es der Island (Strg+Alt+Leertaste).");
+        return true;
+      }
+      return false;
+    }
+    if (r.tier === 2) {
+      const agent = this.d.agent?.enabled() && !quotaBlockedUntil(this.d.db, this.now()) ? this.d.agent : null;
+      const c: Classification = { complexity: "simple", needs_tools: true, category: r.intent?.startsWith("school") ? "apps" : "chat" };
+      if (agent) {
+        await this.agentAnswer(agent, chatId, text, c, `Luis-Jev Stufe 2 ${r.intent ?? ""}`, this.d.cfg.CLAUDE_MODEL_SIMPLE);
+        return true;
+      }
+      return false; // ohne Agent: normaler Weg (lokale Klassifikation, FreeLLM)
+    }
+    return false;
+  }
+
+  /** Zug in den Gesprächsfaden; Antworten ohne Claude zusätzlich als Erinnerung (Claude-Sitzungen erfasst das Plugin). */
+  private async rememberTurn(chatId: number, text: string, answer: string, provider: string): Promise<void> {
+    const m = this.d.memory;
+    if (!m) return;
+    try {
+      await m.note(chatId, "user", text);
+      await m.note(chatId, "assistant", answer, provider);
+      if (provider !== "claude" && answer.trim()) void m.remember(`Luis: ${text}\nAgent (${provider}): ${answer.slice(0, 2000)}`, text.slice(0, 80));
+    } catch (err) {
+      log.warn("memory", (err as Error).message);
     }
   }
 
@@ -358,9 +457,9 @@ export class Gateway {
   }
 
   /** Agent-Modus; bei leerem Kontingent weiter wie bisher (API/FreeLLM/Queue, ohne Werkzeuge). */
-  private async agentAnswer(agent: AgentMode, chatId: number, text: string, c: Classification | null, reason: string): Promise<void> {
+  private async agentAnswer(agent: AgentMode, chatId: number, text: string, c: Classification | null, reason: string, modelOverride?: string): Promise<void> {
     const cfg = this.d.cfg;
-    const model = c?.complexity === "hard" ? cfg.CLAUDE_MODEL_HARD : cfg.CLAUDE_MODEL_COMPLEX;
+    const model = modelOverride ?? (c?.complexity === "hard" ? cfg.CLAUDE_MODEL_HARD : cfg.CLAUDE_MODEL_COMPLEX);
     const started = this.now();
     const decision = (ok: boolean, why: string) => ({
       provider: "claude" as const,
@@ -372,18 +471,31 @@ export class Gateway {
       ok,
     });
     try {
-      const res = await agent.answer(chatId, text, model);
+      // Gedächtnis: neue oder „fremde“ Sitzung (FreeLLM hat zwischendurch geantwortet) bekommt Profil + Verlauf mit
+      let prompt = text;
+      const m = this.d.memory;
+      if (m) {
+        const foreign = m.foreignSinceClaude(chatId);
+        if (foreign) agent.reset(chatId);
+        const fresh = foreign || agent.session(chatId) === null;
+        const block = fresh ? await m.context(chatId, text, true) : await m.recall(text, 3).then((r) => (r ? `Erinnerungen (claude-mem):\n${r}` : ""));
+        if (block) prompt = `<kontext>\n${block}\n</kontext>\n\nNachricht von Luis: ${text}`;
+      }
+      const res = await agent.answer(chatId, prompt, model);
       logDecision(this.d.db, text, decision(true, ""), this.now());
       log.info("router", `${msgHash(text)} → Agent ${model} (${reason}) ${this.now() - started} ms`);
       await this.d.tg.send(chatId, markdownToHtml(res.text));
+      await this.rememberTurn(chatId, text, res.text, "claude");
     } catch (err) {
       if (err instanceof QuotaError) {
         markQuotaExhausted(this.d.db, err.resetAt, this.now());
         logDecision(this.d.db, text, decision(false, "; Kontingent leer"), this.now());
         const cls = c ?? { complexity: "complex" as const, needs_tools: false, category: "chat" as const };
-        const answer = await this.d.router.answer(chatId, text, cls, `${reason}; Agent: Kontingent leer`);
+        const remembered = await this.d.memory?.context(chatId, text, true);
+        const answer = await this.d.router.answer(chatId, text, cls, `${reason}; Agent: Kontingent leer`, { context: remembered || undefined });
         const notice = [answer.notice, "ohne Werkzeuge, bis das Pro-Kontingent zurück ist"].filter(Boolean).join(" · ");
         await this.sendAnswer(chatId, { ...answer, notice });
+        await this.rememberTurn(chatId, text, answer.text, answer.decision.provider);
         return;
       }
       logDecision(this.d.db, text, decision(false, `; ${(err as Error).message.slice(0, 200)}`), this.now());
@@ -472,12 +584,37 @@ export class Gateway {
         this.d.agent?.reset(chatId);
         await this.d.tg.send(chatId, "🆕 Neue Sitzung – der bisherige Verlauf ist vergessen.");
         return;
-      case "stop":
-        await this.d.tg.send(chatId, this.d.agent?.stop(chatId) ? "✖️ Wird abgebrochen…" : "Gerade läuft nichts.");
+      case "stop": {
+        const stopped = [this.d.agent?.stop(chatId), this.d.planGoal?.stopAll(chatId)].some(Boolean);
+        await this.d.tg.send(chatId, stopped ? "✖️ Wird abgebrochen…" : "Gerade läuft nichts.");
+        return;
+      }
+      case "profil":
+      case "profile":
+        await this.d.tg.send(chatId, this.profileCommand(arg));
         return;
       default:
         await this.d.tg.send(chatId, `Unbekannter Befehl. /help`);
     }
+  }
+
+  /** „/profil“ zeigt das Profil, „/profil Schule: 10. Klasse“ setzt, „/profil Schule -“ löscht. */
+  profileCommand(arg: string): string {
+    const memory = this.d.memory;
+    if (!memory) return "Gedächtnis ist aus.";
+    const del = arg.match(/^(.{1,60}?)\s+-$/);
+    if (del) {
+      memory.deleteProfile(del[1].trim());
+      return `🗑 „${escapeHtml(del[1].trim())}“ aus dem Profil entfernt.`;
+    }
+    const set = arg.match(/^([^:]{1,60}):\s*([\s\S]+)$/);
+    if (set) {
+      if (!memory.setProfile(set[1].trim(), set[2].trim())) return "🔒 Passwörter, PINs und Schlüssel speichere ich nie.";
+      return `✅ Gemerkt: <b>${escapeHtml(set[1].trim())}</b>`;
+    }
+    const rows = memory.profile();
+    if (!rows.length) return "Noch nichts im Profil. Beispiel: <code>/profil Schule: 10. Klasse</code>";
+    return `<b>Über dich</b>\n${rows.map((r) => `• <b>${escapeHtml(r.key)}</b>: ${escapeHtml(r.value)}`).join("\n")}`;
   }
 
   jobsText(): string {

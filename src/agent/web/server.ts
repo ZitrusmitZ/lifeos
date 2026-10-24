@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { routingSchema } from "../luis-jev.ts";
 import { chmodSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { z } from "zod";
@@ -71,7 +72,7 @@ export type WebServerDeps = {
 };
 
 const messageSchema = z
-  .object({ text: z.string().trim().max(MAX_TEXT), attachments: attachmentsSchema.default([]) })
+  .object({ text: z.string().trim().max(MAX_TEXT), attachments: attachmentsSchema.default([]), routing: routingSchema.optional() })
   .refine((m) => m.text.length > 0 || m.attachments.length > 0);
 const modeSchema = z.object({ mode: z.enum(["default", "auto", "readonly"]), minutes: z.number().int().min(1).max(480).optional() });
 const extendSchema = z.object({ minutes: z.number().int().min(1).max(480).optional() });
@@ -80,7 +81,7 @@ const patchSchema = z
   .strict()
   .refine((p) => Object.keys(p).length > 0);
 const VIEWS = new Set<string>(["active", "pinned", "archived"]);
-const actionSchema = z.object({ data: z.string().regex(/^[cja]:[0-9a-f]{12}:[yn]$/) });
+const actionSchema = z.object({ data: z.string().regex(/^[cjap]:[0-9a-f]{12}:[yn]$/) });
 
 const settingsPutSchema = settingsSchema;
 
@@ -169,11 +170,11 @@ export function createWebHandler(deps: WebServerDeps) {
         if (method === "POST") {
           const parsed = messageSchema.safeParse(await readJson(req));
           if (!parsed.success) throw new HttpError(400, `Text fehlt oder ist länger als ${MAX_TEXT} Zeichen (bzw. ungültige Anhänge)`);
-          const { text, attachments } = parsed.data;
+          const { text, attachments, routing } = parsed.data;
           const id = addMessage(deps.db, session.id, { role: "user", html: escapeHtml(text), attachments }, now());
           // Antwort kann dauern (Claude bis zu Minuten) – das Dashboard pollt
           void deps.web
-            .track(session.id, () => deps.gateway.handleWebText(session.id, text, attachments))
+            .track(session.id, () => deps.gateway.handleWebText(session.id, text, attachments, routing))
             .catch((err) => log.error("web", (err as Error).message));
           return { status: 202, body: { id } };
         }

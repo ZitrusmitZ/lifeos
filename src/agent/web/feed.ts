@@ -5,7 +5,7 @@ import type { AgentDB } from "../db.ts";
 import { APPROVAL_PREFIX, isRootTool } from "../mcp/approvals.ts";
 import { describeCron } from "../scheduler/cron.ts";
 import type { ParsedSchedule } from "../scheduler/parse.ts";
-import { escapeHtml } from "../telegram/format.ts";
+import { escapeHtml, markdownToHtml } from "../telegram/format.ts";
 import type { WebMessenger } from "./messenger.ts";
 import type { WebStatus } from "./server.ts";
 
@@ -22,7 +22,7 @@ const CODER_MAX = 20;
 
 export type FeedPending = {
   id: string;
-  kind: "confirm" | "job" | "approval";
+  kind: "confirm" | "job" | "approval" | "plan";
   tool: string;
   root: boolean;
   preview_html: string;
@@ -32,6 +32,9 @@ export type FeedPending = {
   expires_at: number;
   allow: string;
   deny: string;
+  /** nur bei kind "plan": der Plan als Markdown und das Prüfkriterium */
+  plan_markdown?: string;
+  criterion?: string;
 };
 
 export type FeedCoder = {
@@ -62,7 +65,7 @@ export type FeedDeps = {
   permissions?: Pick<PermissionPolicy, "state">;
 };
 
-const PREFIX = { confirm: "c", job: "j", approval: "a" } as const;
+const PREFIX = { confirm: "c", job: "j", approval: "a", plan: "p" } as const;
 
 function kindOf(tool: string): FeedPending["kind"] {
   if (tool === "job_create") return "job";
@@ -109,6 +112,27 @@ export function feedPending(deps: Pick<FeedDeps, "db" | "approvals">, now: numbe
       expires_at: r.expires_at,
       allow: `${p}:${r.id}:y`,
       deny: `${p}:${r.id}:n`,
+    });
+  }
+  // Stufe-3-Pläne (Luis-Jev): warten auf Luis' Freigabe; der ganze Plan geht mit (Island zeigt ihn groß)
+  const plans = deps.db
+    .prepare("SELECT id, chat_id, task, kind, plan, goal, criterion, created_at FROM plans WHERE status = 'waiting' ORDER BY created_at")
+    .all() as { id: string; chat_id: number; task: string; kind: string; plan: string; goal: string; criterion: string; created_at: number }[];
+  for (const pl of plans) {
+    out.push({
+      id: pl.id,
+      kind: "plan",
+      tool: `plan:${pl.kind}`,
+      root: false,
+      preview_html: `<b>${escapeHtml(pl.goal || pl.task)}</b>\n${markdownToHtml(pl.plan)}`,
+      chat_id: pl.chat_id,
+      session_id: sessionOf(deps.db, pl.chat_id),
+      created_at: pl.created_at,
+      expires_at: pl.created_at + 7 * 24 * 3600_000,
+      allow: `p:${pl.id}:y`,
+      deny: `p:${pl.id}:n`,
+      plan_markdown: pl.plan,
+      criterion: pl.criterion,
     });
   }
   return out;

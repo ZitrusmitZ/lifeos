@@ -3,7 +3,7 @@ import { z } from "zod";
 import { agentRequest, agentResponse } from "@/lib/agent-chat";
 
 /** Button im Chat („Ausführen“/„Abbrechen“, „Anlegen“, Connector-Freigaben) – gleiche Daten wie die Telegram-Buttons. */
-const schema = z.object({ data: z.string().regex(/^[cja]:[0-9a-f]{12}:[yn]$/) });
+const schema = z.object({ data: z.string().regex(/^[cjap]:[0-9a-f]{12}:[yn]$/) });
 
 export async function POST(request: Request) {
   await connection();

@@ -162,7 +162,7 @@ When the Pro quota is exhausted (or Claude isn't logged in), the router answers 
 ENABLE_FREE_PROVIDER=true
 FREE_LLM_URL=http://127.0.0.1:3001
 FREE_LLM_KEY=<FreeLLMAPI key>
-FREE_LLM_MODEL=gemini-flash,deepseek-v4-flash,llama-3.3-70b,auto   # tried in order
+FREE_LLM_MODEL=auto   # or a list tried in order, e.g. gemini-flash,auto
 ```
 
 Note: free tiers may use prompts for training – that's why only plain chat goes there.
