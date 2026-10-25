@@ -166,3 +166,20 @@ describe("localWhisperTranscriber / fallbackTranscriber", () => {
     await expect(stt(WAV, { lang: "de" })).rejects.toThrow("HTTP 502 · Whisper lokal: kein Modell");
   });
 });
+
+describe("fallbackTranscriber: Fehlversuch überspringen", () => {
+  it("nach einem FreeLLM-Fehler 10 Min. direkt lokal, danach wieder FreeLLM", async () => {
+    let t = 0;
+    const remote = vi.fn<Transcriber>(async () => Promise.reject(new Error("HTTP 502")));
+    const local = vi.fn<Transcriber>(async () => ({ text: "lokal", via: "local/small" }));
+    const stt = fallbackTranscriber(remote, local, undefined, 10 * 60_000, () => t);
+    await stt(WAV, { lang: "de" });
+    t = 9 * 60_000;
+    await stt(WAV, { lang: "de" });
+    expect(remote).toHaveBeenCalledTimes(1);
+    expect(local).toHaveBeenCalledTimes(2);
+    t = 11 * 60_000;
+    await stt(WAV, { lang: "de" });
+    expect(remote).toHaveBeenCalledTimes(2);
+  });
+});

@@ -223,9 +223,12 @@ export class Gateway {
       return;
     }
     let text: string;
+    const t0 = Date.now();
     try {
-      const audio = await this.d.files.download(voice.file_id);
-      text = (await this.d.stt(audio, { lang: "de", name: "voice.ogg", type: voice.mime_type ?? "audio/ogg" })).text;
+      const audio = await this.whileTyping(chatId, () => this.d.files!.download(voice.file_id));
+      const res = await this.whileTyping(chatId, () => this.d.stt!(audio, { lang: "de", name: "voice.ogg", type: voice.mime_type ?? "audio/ogg" }));
+      text = res.text;
+      log.info("stt", `${voice.duration} s Audio → ${res.via ?? "?"} in ${Date.now() - t0} ms`);
     } catch (err) {
       await this.d.tg.send(chatId, `⚠️ Spracherkennung fehlgeschlagen: ${escapeHtml((err as Error).message)}`);
       return;
@@ -247,7 +250,10 @@ export class Gateway {
     const spoken = sent.length ? spokenText(sent[sent.length - 1]) : "";
     if (!spoken) return;
     try {
-      await this.d.tg.sendVoice!(chatId, await this.d.speaker!(spoken));
+      const t1 = Date.now();
+      const ogg = await this.whileTyping(chatId, () => this.d.speaker!(spoken));
+      await this.d.tg.sendVoice!(chatId, ogg);
+      log.info("tts", `${spoken.length} Zeichen in ${Date.now() - t1} ms`);
     } catch (err) {
       log.warn("tts", `Sprachantwort fehlgeschlagen: ${(err as Error).message}`);
     }
@@ -664,6 +670,15 @@ export class Gateway {
     void this.d.tg.typing(chatId);
     const timer = setInterval(() => void this.d.tg.typing(chatId), 4000);
     return () => clearInterval(timer);
+  }
+
+  private async whileTyping<T>(chatId: number, fn: () => Promise<T>): Promise<T> {
+    const stop = this.keepTyping(chatId);
+    try {
+      return await fn();
+    } finally {
+      stop();
+    }
   }
 
   private logRule(text: string, reason: string): void {

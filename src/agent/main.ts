@@ -174,7 +174,7 @@ async function main(): Promise<void> {
   if (!localStt) log.warn("stt", `lokales Whisper fehlt (${cfg.LOCAL_STT_PYTHON}) – Spracherkennung nur über FreeLLM`);
   const stt =
     remoteStt && localStt
-      ? fallbackTranscriber(remoteStt, localStt, (e) => log.warn("stt", `FreeLLM: ${e.message.slice(0, 160)} – lokal weiter`))
+      ? fallbackTranscriber(remoteStt, localStt, (e) => log.warn("stt", `FreeLLM: ${e.message.slice(0, 160)} – 10 Min. nur lokal`))
       : (remoteStt ?? localStt);
   const piperReady = existsSync(cfg.PIPER_BIN) && existsSync(cfg.PIPER_MODEL);
   if (cfg.AGENT_VOICE_REPLIES && !piperReady) log.warn("tts", `Piper fehlt (${cfg.PIPER_BIN}) – Sprachnachrichten werden nur mit Text beantwortet`);
