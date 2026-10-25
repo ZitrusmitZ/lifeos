@@ -1,7 +1,7 @@
 import { LuisJev } from "./luis-jev.ts";
 import { PlanGoal } from "./plan-goal.ts";
 import { Memory } from "./memory.ts";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { isPrivateBind, loadConfig, type AgentConfig } from "./config.ts";
@@ -29,6 +29,7 @@ import { ChannelMessenger, pushChatId, WebMessenger } from "./web/messenger.ts";
 import { PermissionPolicy } from "./permissions/policy.ts";
 import { startWebServer } from "./web/server.ts";
 import { freeLlmTranscriber } from "./web/stt.ts";
+import { piperSpeaker } from "./tools/tts.ts";
 
 /**
  * Einstieg: `node src/agent/main.ts [--dry-run]` (Node ≥ 22.18 entfernt die Typen selbst, kein Build-Schritt).
@@ -160,7 +161,10 @@ async function main(): Promise<void> {
   const stt = cfg.FREE_LLM_KEY
     ? freeLlmTranscriber({ url: cfg.FREE_LLM_URL, apiKey: cfg.FREE_LLM_KEY, model: cfg.FREE_LLM_STT_MODEL, timeoutMs: 15_000 })
     : undefined;
-  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined, agent, planGoal, luisJev, memory, stt });
+  const piperReady = existsSync(cfg.PIPER_BIN) && existsSync(cfg.PIPER_MODEL);
+  if (cfg.AGENT_VOICE_REPLIES && !piperReady) log.warn("tts", `Piper fehlt (${cfg.PIPER_BIN}) – Sprachnachrichten werden nur mit Text beantwortet`);
+  const speaker = cfg.AGENT_VOICE_REPLIES && piperReady ? piperSpeaker({ bin: cfg.PIPER_BIN, model: cfg.PIPER_MODEL, run: execRunner }) : undefined;
+  const gateway = new Gateway({ db, tg, cfg, router, confirm, local, claude, free, approvals, files: telegram ?? undefined, agent, planGoal, luisJev, memory, stt, speaker });
   if (approvalEndpoint && cfg.AGENT_CONNECTORS) log.info("approve", "Connectors aktiv – ändernde Aktionen nur nach Bestätigung");
   const sampler = new MemSampler();
 

@@ -1,3 +1,5 @@
+import type { Speaker } from "./tools/tts.ts";
+import { spokenText } from "./tools/tts.ts";
 import type { Transcriber } from "./web/stt.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import type { AgentConfig } from "./config.ts";
@@ -126,6 +128,8 @@ export type GatewayDeps = {
   fileDebounceMs?: number;
   /** Spracherkennung (FreeLLM) für Telegram-Sprachnachrichten */
   stt?: Transcriber;
+  /** Sprachausgabe (Piper): wer per Sprache fragt, bekommt die Antwort zusätzlich als Sprachnachricht */
+  speaker?: Speaker;
 };
 
 /** Gesammelte Telegram-Dateien eines Chats, bis keine mehr nachkommt. */
@@ -150,9 +154,27 @@ export class Gateway {
   private readonly d: GatewayDeps;
   private readonly limiter: RateLimiter;
   private readonly fileBatches = new Map<number, FileBatch>();
+  /** Chats, deren gesendete Antworten gerade für eine Sprachantwort mitgeschnitten werden */
+  private readonly captures = new Map<number, string[]>();
 
   constructor(deps: GatewayDeps) {
-    this.d = deps;
+    const tg = deps.tg;
+    const captures = this.captures;
+    this.d = {
+      ...deps,
+      tg: {
+        async send(chatId, html, buttons) {
+          // Rückfragen mit Buttons (Freigaben, Pläne) werden nicht vorgelesen
+          // ebenso die Fortschrittsanzeige „🛠 Arbeite…“, die danach nur noch editiert wird
+          if (!buttons?.length && !html.startsWith("🛠")) captures.get(chatId)?.push(html);
+          return tg.send(chatId, html, buttons);
+        },
+        edit: (chatId, messageId, html) => tg.edit(chatId, messageId, html),
+        answerCallback: (id, text) => tg.answerCallback(id, text),
+        typing: (chatId) => tg.typing(chatId),
+        ...(tg.sendVoice ? { sendVoice: (chatId: number, ogg: Uint8Array) => tg.sendVoice!(chatId, ogg) } : {}),
+      },
+    };
     this.limiter = new RateLimiter(deps.cfg.AGENT_RATE_LIMIT_PER_MIN);
   }
 
@@ -213,7 +235,22 @@ export class Gateway {
       return;
     }
     await this.d.tg.send(chatId, `🎙 „${escapeHtml(text)}“`);
-    await this.process(chatId, text);
+    const speak = this.d.cfg.AGENT_VOICE_REPLIES && this.d.speaker && this.d.tg.sendVoice;
+    if (!speak) return this.process(chatId, text);
+    const sent: string[] = [];
+    this.captures.set(chatId, sent);
+    try {
+      await this.process(chatId, text);
+    } finally {
+      this.captures.delete(chatId);
+    }
+    const spoken = sent.length ? spokenText(sent[sent.length - 1]) : "";
+    if (!spoken) return;
+    try {
+      await this.d.tg.sendVoice!(chatId, await this.d.speaker!(spoken));
+    } catch (err) {
+      log.warn("tts", `Sprachantwort fehlgeschlagen: ${(err as Error).message}`);
+    }
   }
 
   /**
