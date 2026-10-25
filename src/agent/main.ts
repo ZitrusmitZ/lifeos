@@ -28,7 +28,7 @@ import { execRunner, helperCommand } from "./tools/exec.ts";
 import { ChannelMessenger, pushChatId, WebMessenger } from "./web/messenger.ts";
 import { PermissionPolicy } from "./permissions/policy.ts";
 import { startWebServer } from "./web/server.ts";
-import { freeLlmTranscriber } from "./web/stt.ts";
+import { fallbackTranscriber, freeLlmTranscriber, localWhisperTranscriber, type Transcriber } from "./web/stt.ts";
 import { piperSpeaker } from "./tools/tts.ts";
 
 /**
@@ -158,9 +158,24 @@ async function main(): Promise<void> {
     // keine Startwerte vorhanden
   }
   // unabhängig von ENABLE_FREE_PROVIDER (das betrifft nur Chat-Ersatz): der Key genügt – für /api/stt und Telegram-Sprachnachrichten
-  const stt = cfg.FREE_LLM_KEY
+  // FreeLLM zuerst; hat es keinen STT-Anbieter (oder ist weg), transkribiert faster-whisper lokal
+  const remoteStt = cfg.FREE_LLM_KEY
     ? freeLlmTranscriber({ url: cfg.FREE_LLM_URL, apiKey: cfg.FREE_LLM_KEY, model: cfg.FREE_LLM_STT_MODEL, timeoutMs: 15_000 })
     : undefined;
+  const localStt: Transcriber | undefined = existsSync(cfg.LOCAL_STT_PYTHON)
+    ? localWhisperTranscriber({
+        python: cfg.LOCAL_STT_PYTHON,
+        script: path.join(import.meta.dirname, "tools", "stt_local.py"),
+        model: cfg.LOCAL_STT_MODEL,
+        modelDir: path.join(path.dirname(path.dirname(cfg.LOCAL_STT_PYTHON)), "models"),
+        run: execRunner,
+      })
+    : undefined;
+  if (!localStt) log.warn("stt", `lokales Whisper fehlt (${cfg.LOCAL_STT_PYTHON}) – Spracherkennung nur über FreeLLM`);
+  const stt =
+    remoteStt && localStt
+      ? fallbackTranscriber(remoteStt, localStt, (e) => log.warn("stt", `FreeLLM: ${e.message.slice(0, 160)} – lokal weiter`))
+      : (remoteStt ?? localStt);
   const piperReady = existsSync(cfg.PIPER_BIN) && existsSync(cfg.PIPER_MODEL);
   if (cfg.AGENT_VOICE_REPLIES && !piperReady) log.warn("tts", `Piper fehlt (${cfg.PIPER_BIN}) – Sprachnachrichten werden nur mit Text beantwortet`);
   const speaker = cfg.AGENT_VOICE_REPLIES && piperReady ? piperSpeaker({ bin: cfg.PIPER_BIN, model: cfg.PIPER_MODEL, run: execRunner }) : undefined;
