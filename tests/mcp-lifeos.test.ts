@@ -36,7 +36,7 @@ describe("LifeOS-MCP", () => {
     const list = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
     const tools = list.result.tools as { name: string; annotations: { readOnlyHint: boolean; destructiveHint: boolean } }[];
     const ro = Object.fromEntries(tools.map((t) => [t.name, t.annotations.readOnlyHint]));
-    expect(ro).toMatchObject({ get_overview: true, list_habits: true, set_habit_done: false, create_reminder: false, add_grade: false, add_flashcards: false, get_homeserver_status: true });
+    expect(ro).toMatchObject({ get_overview: true, list_habits: true, set_habit_done: false, create_reminder: false, add_grade: false, add_flashcards: false, get_homeserver_status: true, get_reading: true });
     expect(tools.every((t) => t.annotations.destructiveHint === false)).toBe(true);
     expect(tools.some((t) => /delete|remove/.test(t.name))).toBe(false);
   });
@@ -118,5 +118,10 @@ describe("LifeOS-MCP", () => {
     expect(data.pihole.blocking.enabled).toBe(true);
     expect(data.nextcloud.version).toBe("35.0.2");
     expect(data.nextcloud.recent_files.length).toBeGreaterThan(0);
+  });
+  it("Lesen: Minuten, Ziel, Serie – ohne Buch ist last_book null", async () => {
+    const { data } = await call<{ today_minutes: number; goal_minutes: number; goal_reached: boolean; streak_days: number; week: unknown[]; last_book: unknown }>("get_reading");
+    expect(data).toMatchObject({ today_minutes: 0, goal_minutes: 20, goal_reached: false, streak_days: 0, last_book: null });
+    expect(data.week).toHaveLength(7);
   });
 });

@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { env } from "@/lib/env";
 import { addCards, createDeck, dayEnd, dueCount, listDecks, newCardsLeft } from "@/lib/flashcards";
 import { addGrade, GRADE_KINDS, listGradeCourses, projection, SEMESTERS, semesterPoints } from "@/lib/grades";
+import { readingStats } from "@/lib/books";
 import { listHabits, toggleHabit } from "@/lib/habits";
 import { healthSeries, METRIC_KEYS, METRICS, upsertHealth, type HealthValues } from "@/lib/health";
 import { completeReminder, createReminder, listReminders } from "@/lib/one-off-reminders";
@@ -27,7 +28,7 @@ export const LIFEOS_SERVER_INFO: McpServerInfo = {
   instructions:
     "Persönliches Dashboard von Luis (Schüler, Oberstufe Brandenburg). Mit `get_overview` starten – das liefert heute offene Habits, " +
     "anstehende Erinnerungen, fällige Karteikarten und Lerneinheiten in einem Aufruf. Zeiten und Tage in Europe/Berlin (YYYY-MM-DD, HH:MM). " +
-    "Noten sind Punkte 0–15 (Qualifikationsphase Q1–Q4). Für Stundenplan und Klausuren den Untis-Server nutzen. Löschen ist hier nicht möglich.",
+    "Noten sind Punkte 0–15 (Qualifikationsphase Q1–Q4). Lesezeit und Serie: `get_reading`. Für Stundenplan und Klausuren den Untis-Server nutzen. Löschen ist hier nicht möglich.",
 };
 
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format YYYY-MM-DD");
@@ -286,6 +287,26 @@ export const lifeosTools = [
       const range = lastDays(todayStr(), days);
       const series = healthSeries(db(), range);
       return range.map((day, i) => ({ day, ...Object.fromEntries(METRIC_KEYS.map((k) => [k, series[k][i]])) }));
+    },
+  }),
+  // ─── Lesen ───────────────────────────────────────────────────────────
+  defineTool({
+    name: "get_reading",
+    description:
+      "Lesen (EPUB-Bibliothek): heute gelesene Minuten gegen das Tagesziel, Serie in Tagen, letzte 7 Tage und das zuletzt gelesene Buch " +
+      "mit Fortschritt. `url` öffnet das Buch an der letzten Stelle (relativ zu LifeOS).",
+    input: z.object({}),
+    annotations: READS,
+    async run() {
+      const s = readingStats(db(), todayStr());
+      return {
+        today_minutes: s.todayMinutes,
+        goal_minutes: s.goalMinutes,
+        goal_reached: s.done,
+        streak_days: s.streak,
+        week: s.week,
+        last_book: s.last ? { title: s.last.title, author: s.last.author, percent: Math.round(s.last.percent), url: `/lesen/${s.last.id}` } : null,
+      };
     },
   }),
   defineTool({

@@ -34,6 +34,29 @@ export function claudeEnv(source: Record<string, string | undefined> = process.e
   return env;
 }
 
+/** FreeLLMAPI als Anthropic-kompatibles Backend der CLI (Pro-Kontingent leer) */
+export type FreeBackend = { url: string; key: string; model: string };
+
+/**
+ * Umgebung für die CLI gegen FreeLLMAPI: alle geerbten Claude-/Anthropic-Werte weg (sonst gewinnt das Abo bzw. ein
+ * Gateway), dann Basis-URL, Schlüssel und für jede Modellklasse dasselbe FreeLLM-Modell (wie `coderEnv`).
+ */
+export function freeLlmEnv(source: Record<string, string | undefined>, free: FreeBackend): NodeJS.ProcessEnv {
+  const env = claudeEnv(source);
+  for (const k of Object.keys(env)) if (/^(ANTHROPIC_|CLAUDE_CODE_OAUTH|CLAUDECODE$)/.test(k)) delete env[k];
+  Object.assign(env, {
+    ANTHROPIC_BASE_URL: free.url.replace(/\/+$/, ""),
+    ANTHROPIC_AUTH_TOKEN: free.key,
+    ANTHROPIC_MODEL: free.model,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: free.model,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: free.model,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: free.model,
+    ANTHROPIC_SMALL_FAST_MODEL: free.model,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  });
+  return env;
+}
+
 export type ClaudeRunOptions = {
   model: string;
   /** erlaubte eingebaute Tools; leer = keine (reiner Chat) */
@@ -247,7 +270,15 @@ export function approveConfig(approveScript: string, endpoint: { socketPath: str
   };
 }
 
-export type RunExtra = { cwd?: string; timeoutMs?: number; onProgress?: () => void; onLine?: (line: string) => void; signal?: AbortSignal };
+export type RunExtra = {
+  cwd?: string;
+  timeoutMs?: number;
+  onProgress?: () => void;
+  onLine?: (line: string) => void;
+  signal?: AbortSignal;
+  /** statt Pro-Abo über FreeLLMAPI (gleiche Tools und Freigaben, ohne claude.ai-Connectors) */
+  free?: FreeBackend;
+};
 
 export class ClaudeProvider implements Provider {
   readonly name = "claude" as const;
@@ -330,7 +361,8 @@ export class ClaudeProvider implements Provider {
     const file = writeApproveConfig(a, endpoint, chatId, { root: extra.root, tools: extra.lifeosTools });
     // connectors: zusätzlich die claude.ai-Connectors (gleicher Freigabe-Server, kein --strict-mcp-config)
     const mcp = { mcpConfigFile: file, promptTool: APPROVE_PROMPT_TOOL };
-    const withMcp = extra.connectors && this.connectorsReady() ? { connectors: mcp } : { approval: mcp };
+    // claude.ai-Connectors hängen am Abo-Login – über FreeLLM gibt es nur den Freigabe-Server (Tools, root_command)
+    const withMcp = extra.connectors && !extra.free && this.connectorsReady() ? { connectors: mcp } : { approval: mcp };
     try {
       return await this.run(prompt, { ...opts, ...withMcp }, {
         ...extra,
@@ -349,7 +381,10 @@ export class ClaudeProvider implements Provider {
       cwd: extra.cwd,
       // MCP_TOOL_TIMEOUT: Aufrufe dürfen auf Luis' Freigabe warten (max. 5 Min) – root_command und LifeOS-Tools
       // (Deploy, Backup) laufen danach selbst bis zu 30 Min
-      env: { ...claudeEnv(process.env, { storedLogin: Boolean(this.o.connectors) }), ...(opts.connectors || opts.approval ? { MCP_TOOL_TIMEOUT: "2400000" } : {}) },
+      env: {
+        ...(extra.free ? freeLlmEnv(process.env, extra.free) : claudeEnv(process.env, { storedLogin: Boolean(this.o.connectors) })),
+        ...(opts.connectors || opts.approval ? { MCP_TOOL_TIMEOUT: "2400000" } : {}),
+      },
       stdin: prompt,
       timeoutMs: extra.timeoutMs ?? this.o.timeoutMs,
       signal: extra.signal,
@@ -360,6 +395,13 @@ export class ClaudeProvider implements Provider {
       },
     });
     const out = parseClaudeStream(lines);
+    if (extra.free) {
+      // FreeLLM hat kein Pro-Kontingent: Fehler sind Anbieter-Fehler, Rate-Limit-Ereignisse gehören nicht in /quota
+      if (out.isError || code !== 0 || !out.text) {
+        throw new ProviderError(`FreeLLM-Agent: ${([out.text, stderr].filter(Boolean).join("\n").trim() || `Code ${code}`).slice(0, 300)}`);
+      }
+      return { text: out.text, model: `freellm:${extra.free.model}`, durationMs: Date.now() - started, costUsd: 0, sessionId: out.sessionId };
+    }
     if (out.rateLimit) this.o.onRateLimit?.(out.rateLimit);
 
     if (out.rateLimit?.status === "rejected" && (out.isError || !out.text)) {

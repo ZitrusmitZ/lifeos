@@ -302,6 +302,23 @@ export async function saveWeeklyReviewSettingsAction(_prev: FormState, formData:
   return { ok: true, message: parsed.data.enabled ? `Gespeichert – kommt sonntags um ${parsed.data.time}` : "Gespeichert – Push aus" };
 }
 
+const readingSchema = z.object({
+  goalMinutes: z.coerce.number().int().min(1, "Mindestens 1 Minute").max(600, "Höchstens 600 Minuten"),
+  reminder: z.boolean(),
+  time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Uhrzeit im Format HH:MM"),
+});
+
+export async function saveReadingSettingsAction(_prev: FormState, formData: FormData): Promise<FormState> {
+  const parsed = readingSchema.safeParse({ goalMinutes: formData.get("goalMinutes"), reminder: formData.get("reminder") === "on", time: String(formData.get("time") ?? "") });
+  if (!parsed.success) return { ok: false, message: parsed.error.issues[0].message };
+  setSetting(db(), "reading", parsed.data);
+  revalidatePath("/", "layout");
+  return {
+    ok: true,
+    message: `Gespeichert – ${parsed.data.goalMinutes} Min. am Tag${parsed.data.reminder ? `, Erinnerung um ${parsed.data.time}, wenn das Ziel noch offen ist` : ", ohne Erinnerung"}`,
+  };
+}
+
 export async function saveNewCardsAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = z.coerce.number().int().min(1, "Mindestens 1").max(500, "Höchstens 500").safeParse(formData.get("perDay"));
   if (!parsed.success) return { ok: false, message: parsed.error.issues[0].message };

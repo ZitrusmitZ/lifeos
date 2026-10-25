@@ -74,7 +74,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         </header>
         <div className="mx-auto flex min-h-full max-w-7xl flex-col pr-[max(16px,env(safe-area-inset-right))] pb-[calc(104px+env(safe-area-inset-bottom))] pl-[max(16px,env(safe-area-inset-left))] md:pr-[max(24px,env(safe-area-inset-right))] md:pl-[max(24px,env(safe-area-inset-left))] desktop:px-6 desktop:pb-12">
           <PullToRefresh />
-          <main className="flex-1 pt-3 desktop:pt-6">{children}</main>
+          {/* viewport-fit=cover: ohne den Abstand liegt der Inhalt unter Statusleiste/Dynamic Island (dort nimmt iOS die Tipps) */}
+          <main className="flex-1 pt-[calc(env(safe-area-inset-top)+0.75rem)] desktop:pt-6">{children}</main>
         </div>
         <BottomNav />
         <FocusDock />

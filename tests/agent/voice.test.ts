@@ -1,0 +1,76 @@
+import { describe, expect, it, vi } from "vitest";
+import { ConfirmFlow } from "@/agent/confirm";
+import { Gateway } from "@/agent/gateway";
+import { ClaudeProvider } from "@/agent/providers/claude";
+import { Router } from "@/agent/router";
+import type { TgUpdate } from "@/agent/telegram/api";
+import type { Runner } from "@/agent/tools/exec";
+import type { Transcriber } from "@/agent/web/stt";
+import { agentDb, FakeMessenger, FakeProvider, LUIS, testConfig, TZ } from "./fakes";
+
+const NOW = Date.parse("2026-10-25T10:00:00+02:00");
+
+function setup(stt?: Transcriber) {
+  const db = agentDb();
+  const tg = new FakeMessenger();
+  const cfg = testConfig();
+  const local = new FakeProvider("local", () => '{"complexity":"simple","needs_tools":false,"category":"knowledge"}');
+  const claudeFake = new FakeProvider("claude", () => "Antwort vom Agenten");
+  const claude = new ClaudeProvider({ bin: "claude-gibt-es-nicht", tz: TZ, timeoutMs: 1000 });
+  claude.complete = (req) => claudeFake.complete(req);
+  claude.available = () => true;
+  const api = new FakeProvider("api");
+  api.avail = false;
+  const router = new Router({ db, local, claude, api, localModel: "qwen2.5:3b", models: { simple: "haiku", complex: "sonnet", hard: "opus" }, tz: TZ, now: () => NOW });
+  const run = vi.fn<Runner>(async () => ({ code: 0, stdout: "ok", stderr: "" }));
+  const confirm = new ConfirmFlow(db, tg, { cfg, run, dryRun: false }, () => NOW);
+  const files = { download: vi.fn(async () => new Uint8Array([79, 103, 103, 83])) };
+  const gw = new Gateway({ db, tg, cfg, router, confirm, local, claude, now: () => NOW, files, stt });
+  return { tg, gw, files, claudeFake, local };
+}
+
+let id = 1;
+const voice = (duration = 4): TgUpdate => ({
+  update_id: id++,
+  message: { message_id: id, from: { id: LUIS }, chat: { id: LUIS, type: "private" }, date: NOW / 1000, voice: { file_id: "v1", duration, mime_type: "audio/ogg" } },
+});
+
+describe("Telegram-Sprachnachrichten", () => {
+  it("transkribiert als OGG, zeigt den Text und führt ihn wie getippt aus", async () => {
+    const stt = vi.fn<Transcriber>(async () => ({ text: "Wie spät ist es in Tokio?", via: "freellm" }));
+    const { tg, gw, files, claudeFake, local } = setup(stt);
+    await gw.handleUpdate(voice());
+    expect(files.download).toHaveBeenCalledWith("v1");
+    expect(stt).toHaveBeenCalledWith(expect.any(Uint8Array), { lang: "de", name: "voice.ogg", type: "audio/ogg" });
+    expect(tg.sent[0].html).toBe("🎙 „Wie spät ist es in Tokio?“");
+    const prompts = JSON.stringify([...local.calls, ...claudeFake.calls]);
+    expect(prompts).toContain("Wie spät ist es in Tokio?");
+    expect(tg.sent.length).toBeGreaterThan(1);
+  });
+
+  it("ohne Spracherkennung, zu lang oder leer: klare Meldung, nichts ausgeführt", async () => {
+    const none = setup();
+    await none.gw.handleUpdate(voice());
+    expect(none.tg.last().html).toContain("FREE_LLM_KEY");
+    expect(none.files.download).not.toHaveBeenCalled();
+
+    const stt = vi.fn<Transcriber>(async () => ({ text: "", via: "freellm" }));
+    const long = setup(stt);
+    await long.gw.handleUpdate(voice(600));
+    expect(long.tg.last().html).toContain("zu lang");
+    expect(stt).not.toHaveBeenCalled();
+
+    const empty = setup(stt);
+    await empty.gw.handleUpdate(voice());
+    expect(empty.tg.sent.map((s) => s.html)).toEqual(["🎙 Nichts verstanden – nochmal?"]);
+    expect(empty.claudeFake.calls).toHaveLength(0);
+  });
+
+  it("Fehler der Spracherkennung wird gemeldet", async () => {
+    const { tg, gw } = setup(async () => {
+      throw new Error("HTTP 503");
+    });
+    await gw.handleUpdate(voice());
+    expect(tg.last().html).toContain("HTTP 503");
+  });
+});

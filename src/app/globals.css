@@ -157,7 +157,7 @@
   --status-serious: #c93400;
   --status-critical: #d70015;
   --bar: rgb(255 255 255 / 0.72); /* schwebende Leisten (Glas) */
-  /* Kategorien (nur Symbole, immer mit Text): Schule, Klausuren, Habits, Wetter, Termine, Mail, Posteingang, Gesundheit, News, Musik, GitHub, Karteikarten, Noten */
+  /* Kategorien (nur Symbole, immer mit Text): Schule, Klausuren, Habits, Wetter, Termine, Mail, Posteingang, Gesundheit, News, Musik, GitHub, Karteikarten, Noten, Lesen */
   --cat-school: #5856d6;
   --cat-exams: #c93400;
   --cat-habits: #1e7b34;
@@ -171,6 +171,7 @@
   --cat-github: #3a3a3c;
   --cat-cards: #007d8a;
   --cat-grades: #b25000;
+  --cat-reading: #8a6230;
 }
 
 .dark {
@@ -226,6 +227,7 @@
   --cat-github: #c7c7cc;
   --cat-cards: #40c8e0;
   --cat-grades: #ffb340;
+  --cat-reading: #c9a26b;
 }
 
 /* „Kontrast erhöhen“: Leisten deckend, Trennlinien kräftiger */

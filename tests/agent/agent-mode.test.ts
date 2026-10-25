@@ -9,7 +9,7 @@ import { Gateway } from "@/agent/gateway";
 import { ApprovalBroker, prettyToolName, startApprovalServer, type ApprovalEndpoint } from "@/agent/mcp/approvals";
 import { gateTools, lifeosToolNames, ToolGate } from "@/agent/mcp/tool-gate";
 import { claudeArgs, ClaudeProvider, parseClaudeStream, type ClaudeSpawn } from "@/agent/providers/claude";
-import { QuotaError } from "@/agent/providers/types";
+import { ProviderError, QuotaError } from "@/agent/providers/types";
 import { Router } from "@/agent/router";
 import type { Runner } from "@/agent/tools/exec";
 import { agentDb, FakeMessenger, FakeProvider, LUIS, testConfig, TZ } from "./fakes";
@@ -252,7 +252,7 @@ describe("AgentMode", () => {
 });
 
 describe("Gateway im Agent-Modus", () => {
-  function setup(classification: string | ((text: string) => string), agentImpl: (text: string) => Promise<string>) {
+  function setup(classification: string | ((text: string) => string), agentImpl: (text: string, free?: boolean) => Promise<string>, opts: { free?: boolean } = {}) {
     const db = agentDb();
     const tg = new FakeMessenger();
     const cfg = testConfig();
@@ -265,16 +265,17 @@ describe("Gateway im Agent-Modus", () => {
     const router = new Router({ db, local, claude, api, localModel: "qwen2.5:3b", models: { simple: "haiku", complex: "sonnet", hard: "opus" }, tz: TZ });
     const confirm = new ConfirmFlow(db, tg, { cfg, run: vi.fn<Runner>(), dryRun: false });
     let active = false;
-    const calls: { text: string; model: string }[] = [];
+    const calls: { text: string; model: string; free?: boolean }[] = [];
     const agent = {
       enabled: () => true,
+      freeEnabled: () => opts.free === true,
       active: () => active,
       reset: vi.fn(),
       stop: vi.fn(() => false),
-      answer: async (_c: number, text: string, model: string) => {
-        calls.push({ text, model });
+      answer: async (_c: number, text: string, model: string, o: { free?: boolean } = {}) => {
+        calls.push(o.free ? { text, model, free: true } : { text, model });
         active = true;
-        return { text: await agentImpl(text), model, durationMs: 1 };
+        return { text: await agentImpl(text, o.free), model: o.free ? "freellm:auto" : model, durationMs: 1 };
       },
     } as unknown as AgentMode;
     const gw = new Gateway({ db, tg, cfg, router, confirm, local, claude, agent });
@@ -306,6 +307,36 @@ describe("Gateway im Agent-Modus", () => {
     const { gw, tg } = setup(cls("complex", "server"), async () => {
       throw new QuotaError("limit", Date.now() + 3_600_000);
     });
+    await gw.handleUpdate(msg("Warum ist der Server langsam?"));
+    expect(tg.last().html).toMatch(/ohne Werkzeuge/);
+  });
+
+  it("Kontingent leer + FreeLLM → dieselbe Anfrage mit Werkzeugen über FreeLLM, nicht ohne Werkzeuge", async () => {
+    const { gw, tg, calls, db } = setup(cls("complex", "server"), async (_t, free) => {
+      if (!free) throw new QuotaError("limit", Date.now() + 3_600_000);
+      return "Erledigt: README aktualisiert";
+    }, { free: true });
+    await gw.handleUpdate(msg("Aktualisiere die Doku im Repo"));
+    expect(calls).toEqual([
+      { text: "Aktualisiere die Doku im Repo", model: "sonnet" },
+      { text: "Aktualisiere die Doku im Repo", model: "sonnet", free: true },
+    ]);
+    expect(tg.last().html).toMatch(/Erledigt: README aktualisiert/);
+    expect(tg.last().html).toMatch(/über FreeLLM \(auto\) mit allen Werkzeugen/);
+    expect(tg.last().html).not.toMatch(/ohne Werkzeuge|keine Tools/);
+    const row = db.prepare("SELECT provider, reason FROM routing_log ORDER BY id DESC LIMIT 1").get() as { provider: string; reason: string };
+    expect(row.provider).toBe("free");
+    expect(row.reason).toMatch(/über FreeLLM mit Werkzeugen/);
+    // Kontingent bleibt als leer markiert: die nächste Nachricht geht gleich über FreeLLM, ohne neuen Claude-Versuch
+    await gw.handleUpdate(msg("und committe das"));
+    expect(calls.at(-1)).toEqual({ text: "und committe das", model: "sonnet", free: true });
+  });
+
+  it("FreeLLM-Agent scheitert → erst dann die Antwort ohne Werkzeuge", async () => {
+    const { gw, tg } = setup(cls("complex", "server"), async (_t, free) => {
+      if (!free) throw new QuotaError("limit", Date.now() + 3_600_000);
+      throw new ProviderError("FreeLLM-Agent: 502");
+    }, { free: true });
     await gw.handleUpdate(msg("Warum ist der Server langsam?"));
     expect(tg.last().html).toMatch(/ohne Werkzeuge/);
   });

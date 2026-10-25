@@ -336,6 +336,35 @@ const MIGRATIONS: string[] = [
     created_at INTEGER NOT NULL
   );
   `,
+  `
+  -- Lesen: EPUB-Bücher (Datei unter DATA_DIR/books/<id>.epub), Leseposition, Lesezeit pro Tag, eine Erinnerung pro Tag
+  CREATE TABLE books (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    author      TEXT,
+    language    TEXT,
+    spine       TEXT NOT NULL,
+    toc         TEXT NOT NULL,
+    cover       TEXT,
+    size        INTEGER NOT NULL,
+    added_at    INTEGER NOT NULL,
+    chapter     INTEGER NOT NULL DEFAULT 0,
+    fraction    REAL NOT NULL DEFAULT 0,
+    percent     REAL NOT NULL DEFAULT 0,
+    opened_at   INTEGER,
+    finished_at INTEGER
+  );
+  CREATE TABLE reading_log (
+    day     TEXT NOT NULL,
+    book_id TEXT NOT NULL,
+    seconds INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, book_id)
+  );
+  CREATE TABLE reading_pushes (
+    day       TEXT PRIMARY KEY,
+    pushed_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export type DB = DatabaseSync;

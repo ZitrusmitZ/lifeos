@@ -181,6 +181,12 @@ export class AgentMode {
     return this.d.cfg.AGENT_MODE && this.d.claude.available() && this.d.claude.taskApprovalReady();
   }
 
+  /** Kann der Agent-Modus bei leerem Pro-Kontingent über FreeLLM weiterarbeiten (mit Werkzeugen)? */
+  freeEnabled(): boolean {
+    const c = this.d.cfg;
+    return c.AGENT_MODE && c.AGENT_FREE_TOOLS && c.ENABLE_FREE_PROVIDER && Boolean(c.FREE_LLM_KEY) && this.d.claude.taskApprovalReady();
+  }
+
   /** Sitzung dieses Chats, falls sie nicht zu lange ruht */
   session(chatId: number): string | null {
     const raw = getKv(this.d.db, sessionKey(chatId));
@@ -211,7 +217,7 @@ export class AgentMode {
   }
 
   /** Nachricht als Agent beantworten; Nachrichten eines Chats laufen nacheinander. */
-  async answer(chatId: number, text: string, model: string): Promise<CompletionResult> {
+  async answer(chatId: number, text: string, model: string, opts: { free?: boolean } = {}): Promise<CompletionResult> {
     const q = this.queues.get(chatId) ?? { tail: Promise.resolve(), aborts: new Set<AbortController>() };
     if (this.queues.has(chatId)) {
       await this.d.msg.send(chatId, "⏳ Ich arbeite noch an der vorigen Nachricht – das hier kommt danach dran. (/stop bricht ab)");
@@ -220,7 +226,7 @@ export class AgentMode {
     q.aborts.add(abort);
     const done = q.tail
       .catch(() => undefined)
-      .then(() => (abort.signal.aborted ? Promise.reject(new ProviderError("Von Luis gestoppt")) : this.run(chatId, text, model, abort.signal)));
+      .then(() => (abort.signal.aborted ? Promise.reject(new ProviderError("Von Luis gestoppt")) : this.run(chatId, text, model, abort.signal, opts.free === true)));
     q.tail = done;
     this.queues.set(chatId, q);
     try {
@@ -231,8 +237,9 @@ export class AgentMode {
     }
   }
 
-  private async run(chatId: number, text: string, model: string, signal: AbortSignal): Promise<CompletionResult> {
+  private async run(chatId: number, text: string, model: string, signal: AbortSignal, free: boolean): Promise<CompletionResult> {
     const { cfg, claude } = this.d;
+    const backend = free ? { url: cfg.FREE_LLM_URL, key: cfg.FREE_LLM_KEY ?? "", model: cfg.AGENT_FREE_MODEL } : undefined;
     const [cwd, ...addDirs] = taskDirs(cfg);
     const progress = new Progress(this.d.msg, chatId, this.now);
     const attempt = (resume: string | undefined) =>
@@ -260,6 +267,7 @@ export class AgentMode {
           connectors: cfg.AGENT_CONNECTORS,
           onLine: progress.onLine,
           signal,
+          free: backend,
         },
       );
     const resume = this.session(chatId) ?? undefined;

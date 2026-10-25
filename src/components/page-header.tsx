@@ -27,12 +27,16 @@ export function PageHeader({
   children?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const io = new IntersectionObserver(([e]) => setCollapsed(!e.isIntersecting), { rootMargin: "-8px 0px 0px 0px" });
+    // Einklappen, sobald der Titel unter die Leiste (Statusleiste + 44 pt) rutscht – sonst liegt er kurz unter einer
+    // durchsichtigen Leiste, und Tipps dort landen bei iOS (Statusleiste) statt bei den Knöpfen
+    const top = bar.current?.offsetHeight ?? 0;
+    const io = new IntersectionObserver(([e]) => setCollapsed(!e.isIntersecting), { rootMargin: `-${Math.max(8, top)}px 0px 0px 0px` });
     io.observe(el);
     return () => io.disconnect();
   }, []);
@@ -40,6 +44,7 @@ export function PageHeader({
   return (
     <>
       <div
+        ref={bar}
         aria-hidden={!collapsed}
         className={cn(
           "pointer-events-none fixed inset-x-0 top-0 z-20 border-b border-transparent bg-transparent pt-[env(safe-area-inset-top)] transition-[background-color,border-color] duration-200 desktop:hidden",
