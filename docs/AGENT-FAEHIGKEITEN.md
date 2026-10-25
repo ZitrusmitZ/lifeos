@@ -1,6 +1,6 @@
 # Fähigkeiten: Island ↔ LifeOS-Agent
 
-Stand 25.10.2026 (Dateien von der Island, Sprachantwort in Telegram ergänzt). Diese Liste ist der Vertrag: Was hier „beide“ hat, muss über die Island (Laptop) **und** über den
+Stand 25.10.2026 (Dateien von der Island, Sprachantwort in Telegram, lokale Spracherkennung als Rückfall ergänzt). Diese Liste ist der Vertrag: Was hier „beide“ hat, muss über die Island (Laptop) **und** über den
 LifeOS-Agent (Telegram, Web-Chat) gehen. Die einzige gewollte Ausnahme sind Stufe 0/1, also das Bedienen des Laptops.
 
 **Warum Parität fast von selbst gilt:** Die Island führt nur Stufe 0/1 selbst aus. Alles ab Stufe 2 schickt islandd als
@@ -27,7 +27,7 @@ Fallback. Damit Telegram ohne Modell genauso einordnet, liest der Agent dieselbe
 | **Berechtigungsmodus** (Standard / Auto / Nur lesen) | ✓ (liest `permissions` aus `/feed`, schaltet) | ✓ (Dashboard) | `tests/agent/permissions.test.ts` |
 | **Pro-Kontingent leer**: weiter **mit Werkzeugen** über FreeLLM (gleiche Claude-Code-Sitzung) | ✓ (gleicher Agent) | ✓ | `tests/agent/agent-mode.test.ts`, `claude.test.ts`, `free.test.ts` |
 | **Dateien** annehmen und in Nextcloud einsortieren | ✓ (📎 in der Eingabe, `island send --file`, Nautilus „An LifeOS-Agent senden“) | ✓ (Telegram-Anhang, Web-Upload) | `island/tests/test_lifeos.py`, `tests/agent/uploads.test.ts` |
-| **Sprache** | ✓ (Mikrofon, **Gespräch Strg+Alt+G** mit gesprochenen Ergebnissen und Unterbrechen) | ✓ (Telegram-Sprachnachricht → FreeLLM-STT → wie getippt; Antwort zusätzlich als Sprachnachricht, Piper lokal) | `computah/tests/test_listening.py`, `tests/agent/voice.test.ts`, `tests/agent/tts.test.ts` |
+| **Sprache** | ✓ (Mikrofon, **Gespräch Strg+Alt+G** mit gesprochenen Ergebnissen und Unterbrechen) | ✓ (Telegram-Sprachnachricht → FreeLLM-STT, sonst lokal faster-whisper `small` → wie getippt; Antwort zusätzlich als Sprachnachricht, Piper lokal) | `computah/tests/test_listening.py`, `tests/agent/voice.test.ts`, `tests/agent/tts.test.ts`, `tests/agent/stt.test.ts` |
 
 ## Bekannte Lücken
 

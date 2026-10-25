@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { startWebServer, type WebServerDeps } from "@/agent/web/server";
-import { freeLlmTranscriber, type Transcriber } from "@/agent/web/stt";
+import { fallbackTranscriber, freeLlmTranscriber, localWhisperTranscriber, type Transcriber } from "@/agent/web/stt";
 import { agentDb } from "./fakes";
 
 /** `/stt` im Agenten: Audio für LifeOS' `/api/stt` (ohne Groq-Key) über FreeLLMAPI transkribieren. */
@@ -117,5 +117,52 @@ describe("Socket-Route /stt", () => {
     } finally {
       await close();
     }
+  });
+});
+
+describe("localWhisperTranscriber / fallbackTranscriber", () => {
+  it("lokal: schreibt das Audio in eine Datei und ruft das Skript mit Sprache, Modell und Modellordner", async () => {
+    let seen: string[] = [];
+    let bytes = 0;
+    const run = vi.fn(async (_f: string, args: string[]) => {
+      seen = args;
+      bytes = (await import("node:fs")).readFileSync(args[1]).length;
+      return { code: 0, stdout: " Erinnere mich um acht.\n", stderr: "" };
+    });
+    const stt = localWhisperTranscriber({ python: "/v/bin/python", script: "/app/stt_local.py", model: "small", modelDir: "/v/models", run });
+    expect(await stt(WAV, { lang: "de", name: "voice.ogg" })).toEqual({ text: "Erinnere mich um acht.", via: "local/small" });
+    expect(run.mock.calls[0][0]).toBe("/v/bin/python");
+    expect(seen[0]).toBe("/app/stt_local.py");
+    expect(seen[1]).toMatch(/in\.ogg$/);
+    expect(seen.slice(2)).toEqual(["de", "small", "/v/models"]);
+    expect(bytes).toBe(WAV.length);
+    expect(existsSync(seen[1])).toBe(false); // aufgeräumt
+  });
+
+  it("lokal: Fehler des Skripts werden zur Ausnahme", async () => {
+    const run = vi.fn(async () => ({ code: 1, stdout: "", stderr: "Traceback …\nRuntimeError: kaputt" }));
+    const stt = localWhisperTranscriber({ python: "p", script: "s", model: "small", modelDir: "m", run });
+    await expect(stt(WAV, { lang: "de" })).rejects.toThrow("Whisper lokal: RuntimeError: kaputt");
+  });
+
+  it("Rückfall: FreeLLM scheitert → lokal; FreeLLM klappt → lokal wird nicht gefragt", async () => {
+    const local = vi.fn<Transcriber>(async () => ({ text: "lokal", via: "local/small" }));
+    const onFallback = vi.fn();
+    const broken = fallbackTranscriber(async () => Promise.reject(new Error("HTTP 502: no usable keys")), local, onFallback);
+    expect(await broken(WAV, { lang: "de" })).toEqual({ text: "lokal", via: "local/small" });
+    expect(onFallback.mock.calls[0][0].message).toMatch(/no usable keys/);
+
+    local.mockClear();
+    const ok = fallbackTranscriber(async () => ({ text: "remote", via: "groq" }), local);
+    expect((await ok(WAV, { lang: "de" })).text).toBe("remote");
+    expect(local).not.toHaveBeenCalled();
+  });
+
+  it("Rückfall: scheitern beide, nennt der Fehler beide Gründe", async () => {
+    const stt = fallbackTranscriber(
+      async () => Promise.reject(new Error("HTTP 502")),
+      async () => Promise.reject(new Error("Whisper lokal: kein Modell")),
+    );
+    await expect(stt(WAV, { lang: "de" })).rejects.toThrow("HTTP 502 · Whisper lokal: kein Modell");
   });
 });

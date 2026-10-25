@@ -96,6 +96,9 @@ const schema = z.object({
   FREE_LLM_MODEL: str("auto"),
   /** Spracherkennung für /api/stt ohne Groq-Key; `whisper-1` lässt FreeLLM ein Whisper wählen (mit Failover) */
   FREE_LLM_STT_MODEL: str("whisper-1"),
+  /** Lokaler Rückfall für Spracherkennung (faster-whisper, von install_agent.sh eingerichtet) */
+  LOCAL_STT_PYTHON: str("/var/lib/lifeos-agent/whisper/bin/python"),
+  LOCAL_STT_MODEL: str("small"),
   FREE_LLM_TIMEOUT_MS: num(120_000),
   /** pro Modell der Liste; danach das nächste */
   FREE_LLM_MODEL_TIMEOUT_MS: num(30_000),

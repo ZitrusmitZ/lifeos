@@ -164,6 +164,19 @@ for f in de_DE-thorsten-medium.onnx de_DE-thorsten-medium.onnx.json; do
   [[ -s "$PIPER/$f" ]] || sudo -u lifeos -H curl -fsSL -o "$PIPER/$f" "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/thorsten/medium/$f"
 done
 
+# ── faster-whisper: lokale Spracherkennung, wenn FreeLLM keinen STT-Anbieter hat ──
+# Modell `small` (≈ 1 GB RAM beim Erkennen, daher MemoryMax=2G im Dienst); einmal vorladen, damit zur Laufzeit nichts herunterlädt.
+WHISPER="$DATA/whisper"
+if [[ ! -x "$WHISPER/bin/python" ]] || ! "$WHISPER/bin/python" -c "import faster_whisper" 2>/dev/null; then
+  say "faster-whisper installieren ($WHISPER)"
+  sudo -u lifeos -H python3 -m venv "$WHISPER"
+  sudo -u lifeos -H "$WHISPER/bin/pip" install -q "faster-whisper==1.2.1"
+fi
+if [[ ! -d "$WHISPER/models" ]] || [[ -z "$(ls -A "$WHISPER/models" 2>/dev/null)" ]]; then
+  say "Whisper-Modell small laden"
+  sudo -u lifeos -H "$WHISPER/bin/python" -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8', download_root='$WHISPER/models')" >/dev/null
+fi
+
 # ── claude-CLI für lifeos ─────────────────────────────────────────────
 CLAUDE="$DATA/.local/bin/claude"
 if [[ ! -x "$CLAUDE" ]]; then
