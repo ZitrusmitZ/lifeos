@@ -141,6 +141,12 @@ const schema = z.object({
   /** Modell für den Agent-Modus über FreeLLM (FreeLLMAPI-Router `auto` ist am zuverlässigsten) */
   AGENT_FREE_MODEL: str("auto"),
 
+  // ── Sprachantworten ───────────────────────────────────────────────
+  /** Auf eine Telegram-Sprachnachricht zusätzlich per Sprache antworten (Piper lokal, siehe install_agent.sh) */
+  AGENT_VOICE_REPLIES: bool(true),
+  PIPER_BIN: str("/var/lib/lifeos-agent/piper/bin/piper"),
+  PIPER_MODEL: str("/var/lib/lifeos-agent/piper/de_DE-thorsten-medium.onnx"),
+
   // ── Standard-Jobs ─────────────────────────────────────────────────
   AGENT_JOB_BRIEFING: bool(true),
   AGENT_JOB_HEALTH: bool(true),

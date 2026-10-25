@@ -150,6 +150,20 @@ if ! ollama list 2>/dev/null | awk '{print $1}' | grep -qx "$model"; then
   ollama pull "$model"
 fi
 
+# ── Piper: Sprachantworten in Telegram (AGENT_VOICE_REPLIES) ─────────
+# Lokal, kein Dienst: dieselbe deutsche Stimme wie die Island; ffmpeg macht daraus OGG/Opus für Telegram.
+PIPER="$DATA/piper"
+command -v ffmpeg >/dev/null || { say "ffmpeg installieren"; apt-get install -y -qq ffmpeg >/dev/null; }
+python3 -c "import ensurepip" 2>/dev/null || { say "python3-venv installieren"; apt-get install -y -qq python3-venv >/dev/null; }
+if [[ ! -x "$PIPER/bin/piper" ]]; then
+  say "Piper installieren ($PIPER)"
+  sudo -u lifeos -H python3 -m venv "$PIPER"
+  sudo -u lifeos -H "$PIPER/bin/pip" install -q "piper-tts==1.8.0"
+fi
+for f in de_DE-thorsten-medium.onnx de_DE-thorsten-medium.onnx.json; do
+  [[ -s "$PIPER/$f" ]] || sudo -u lifeos -H curl -fsSL -o "$PIPER/$f" "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/thorsten/medium/$f"
+done
+
 # ── claude-CLI für lifeos ─────────────────────────────────────────────
 CLAUDE="$DATA/.local/bin/claude"
 if [[ ! -x "$CLAUDE" ]]; then

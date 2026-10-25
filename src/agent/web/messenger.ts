@@ -105,6 +105,11 @@ export class ChannelMessenger implements Messenger {
     return t.m.edit(t.chatId, messageId, html);
   }
 
+  /** Sprachnachrichten gibt es nur in Telegram; im Web-Chat bleibt es beim Text. */
+  async sendVoice(chatId: number, ogg: Uint8Array): Promise<void> {
+    if (!isWebChat(chatId) && this.tg?.sendVoice) await this.tg.sendVoice(chatId, ogg);
+  }
+
   /** Callback-IDs von Telegram sind nie leer; Web-Aktionen übergeben "" und brauchen keine Antwort. */
   answerCallback(id: string, text?: string): Promise<void> {
     return id && this.tg ? this.tg.answerCallback(id, text) : Promise.resolve();

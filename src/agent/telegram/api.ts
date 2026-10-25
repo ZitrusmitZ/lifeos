@@ -35,6 +35,8 @@ export interface Messenger {
   edit(chatId: number, messageId: number, html: string): Promise<void>;
   answerCallback(id: string, text?: string): Promise<void>;
   typing(chatId: number): Promise<void>;
+  /** Sprachnachricht (OGG/Opus) – nur Telegram */
+  sendVoice?(chatId: number, ogg: Uint8Array): Promise<void>;
 }
 
 export class TelegramApi implements Messenger, TgFiles {
@@ -99,6 +101,15 @@ export class TelegramApi implements Messenger, TgFiles {
 
   async typing(chatId: number): Promise<void> {
     await this.call("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => undefined);
+  }
+
+  async sendVoice(chatId: number, ogg: Uint8Array): Promise<void> {
+    const form = new FormData();
+    form.append("chat_id", String(chatId));
+    form.append("voice", new Blob([new Uint8Array(ogg)], { type: "audio/ogg" }), "antwort.ogg");
+    const res = await fetch(`${this.base}/sendVoice`, { method: "POST", body: form, signal: AbortSignal.timeout(60_000) });
+    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; description?: string };
+    if (!json.ok) throw new TelegramError("sendVoice", res.status, json.description ?? "unbekannter Fehler");
   }
 
   async download(fileId: string): Promise<Uint8Array> {
