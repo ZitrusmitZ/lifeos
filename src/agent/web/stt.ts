@@ -54,13 +54,19 @@ export function localWhisperTranscriber(o: { python: string; script: string; mod
   };
 }
 
-/** Erst `first` (FreeLLM), bei Fehler `fallback` (lokal); scheitern beide, nennt der Fehler beide Gründe. */
-export function fallbackTranscriber(first: Transcriber, fallback: Transcriber, onFallback?: (err: Error) => void): Transcriber {
+/**
+ * Erst `first` (FreeLLM), bei Fehler `fallback` (lokal); scheitern beide, nennt der Fehler beide Gründe.
+ * Nach einem Fehler wird `first` für `skipMs` übersprungen – sonst kostet jede Sprachnachricht erst den Fehlversuch.
+ */
+export function fallbackTranscriber(first: Transcriber, fallback: Transcriber, onFallback?: (err: Error) => void, skipMs = 10 * 60_000, now = Date.now): Transcriber {
+  let skipUntil = 0;
   return async (audio, opts) => {
+    if (now() < skipUntil) return fallback(audio, opts);
     try {
       return await first(audio, opts);
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
+      skipUntil = now() + skipMs;
       onFallback?.(err);
       try {
         return await fallback(audio, opts);
