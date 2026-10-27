@@ -4,6 +4,7 @@ import {
   CalendarDays,
   ChevronDown,
   ChevronUp,
+  Briefcase,
   Cloud,
   CloudSun,
   GitBranch,
@@ -44,6 +45,7 @@ const ICONS: Record<WidgetId, [LucideIcon, string]> = {
   grades: [Award, "var(--cat-grades)"],
   pihole: [ShieldCheck, "var(--cat-habits)"],
   cloud: [Cloud, "var(--cat-inbox)"],
+  webwerk: [Briefcase, "var(--cat-grades)"],
 };
 
 const MODES: { value: WidgetMode; label: string }[] = [

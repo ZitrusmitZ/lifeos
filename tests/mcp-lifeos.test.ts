@@ -36,7 +36,7 @@ describe("LifeOS-MCP", () => {
     const list = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list" });
     const tools = list.result.tools as { name: string; annotations: { readOnlyHint: boolean; destructiveHint: boolean } }[];
     const ro = Object.fromEntries(tools.map((t) => [t.name, t.annotations.readOnlyHint]));
-    expect(ro).toMatchObject({ get_overview: true, list_habits: true, set_habit_done: false, create_reminder: false, add_grade: false, add_flashcards: false, get_homeserver_status: true, get_reading: true });
+    expect(ro).toMatchObject({ get_overview: true, list_habits: true, set_habit_done: false, create_reminder: false, add_grade: false, add_flashcards: false, get_homeserver_status: true, get_reading: true, get_webwerk: true });
     expect(tools.every((t) => t.annotations.destructiveHint === false)).toBe(true);
     expect(tools.some((t) => /delete|remove/.test(t.name))).toBe(false);
   });
@@ -46,6 +46,13 @@ describe("LifeOS-MCP", () => {
     expect(data.today).toBe(today());
     expect(data.habits.open.length + data.habits.done.length).toBeGreaterThan(0);
     expect(typeof data.flashcards.due).toBe("number");
+  });
+
+  it("Überblick enthält den Webwerk-Stand (Demo-Daten)", async () => {
+    const { data } = await call<{ webwerk: { todo: number; urgent_inquiries: number; appointments_today: string[] } }>("get_overview");
+    expect(data.webwerk.todo).toBeGreaterThan(0);
+    expect(data.webwerk.urgent_inquiries).toBe(0);
+    expect(data.webwerk.appointments_today).toEqual(["16:30 Erstgespräch Website"]);
   });
 
   it("Habit abhaken ist idempotent und aktualisiert das Dashboard", async () => {
@@ -118,6 +125,15 @@ describe("LifeOS-MCP", () => {
     expect(data.pihole.blocking.enabled).toBe(true);
     expect(data.nextcloud.version).toBe("35.0.2");
     expect(data.nextcloud.recent_files.length).toBeGreaterThan(0);
+  });
+  it("liefert das Webwerk Cockpit (Demo-Daten)", async () => {
+    const { data } = await call<{ todo: number; inquiries: unknown[]; overdue: unknown[]; revenueMonth: number; generatedAt?: string }>("get_webwerk");
+    expect(data.todo).toBeGreaterThan(0);
+    expect(data.inquiries).toHaveLength(1);
+    // noch keine Kunden: Demo zeigt weder Umsatz noch überfällige Rechnungen
+    expect(data.revenueMonth).toBe(0);
+    expect(data.overdue).toEqual([]);
+    expect(data.generatedAt).toBeUndefined();
   });
   it("Lesen: Minuten, Ziel, Serie – ohne Buch ist last_book null", async () => {
     const { data } = await call<{ today_minutes: number; goal_minutes: number; goal_reached: boolean; streak_days: number; week: unknown[]; last_book: unknown }>("get_reading");

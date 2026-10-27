@@ -53,6 +53,10 @@ const schema = z.object({
   /** Basis für Freigabe-Links `/d/<token>` – Container lifeos-share (Funnel), z. B. `https://lifeos-share.<tailnet>.ts.net`. Ohne: APP_URL */
   SHARE_PUBLIC_URL: optional,
 
+  // Webwerk Cockpit (cockpit.webwerk-barnim.de): Lesezugriff auf GET /api/lifeos, Schlüssel = LIFEOS_TOKEN dort
+  WEBWERK_URL: z.preprocess(emptyAsUnset, z.string().url().default("https://cockpit.webwerk-barnim.de")),
+  WEBWERK_TOKEN: optional,
+
   // Mail-Sortierung (KI) und geplante Jobs
   OPENAI_API_KEY: optional,
   OPENAI_MODEL: z.preprocess(emptyAsUnset, z.string().default("gpt-6-luna")),

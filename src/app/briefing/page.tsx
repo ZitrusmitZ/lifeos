@@ -9,6 +9,7 @@ import { StudySessionList } from "@/components/study";
 import { WeatherIcon } from "@/components/weather-icon";
 import { WidgetCard, WidgetSkeleton } from "@/components/widget-card";
 import { dayHeading, LessonRow } from "@/components/widgets/school-widget";
+import { WebwerkWidget } from "@/components/widgets/webwerk-widget";
 import { daysUntil } from "@/integrations/exams";
 import { sortEvents } from "@/integrations/google";
 import { briefingTime, getOrCreateBriefing, type Briefing } from "@/lib/briefing";
@@ -235,6 +236,8 @@ async function BriefingContent() {
           {b.lessons ? <SchoolCard b={b} /> : null}
           {b.exams?.length ? <ExamsCard exams={b.exams} day={b.day} /> : null}
           {b.events ? <EventsCard events={b.events} tz={tz} /> : null}
+          {/* live statt Schnappschuss: Anfragen kommen im Lauf des Tages dazu */}
+          {b.webwerk ? <WebwerkWidget /> : null}
           <StudyCard day={b.day} />
           <HabitsCard day={b.day} />
         </div>

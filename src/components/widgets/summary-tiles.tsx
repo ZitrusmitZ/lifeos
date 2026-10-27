@@ -8,6 +8,7 @@ import {
   Inbox,
   Layers,
   BookOpen,
+  Briefcase,
   Award,
   ListChecks,
   MailCheck,
@@ -35,6 +36,7 @@ import {
   loadSpotify,
   loadUntis,
   loadWeather,
+  loadWebwerk,
 } from "@/integrations/loaders";
 import type { WidgetResult } from "@/integrations/core";
 import type { WidgetId } from "@/lib/dashboard";
@@ -42,6 +44,7 @@ import { formatSize } from "@/lib/drive/policy";
 import { formatNote, formatPoints } from "@/lib/grades";
 import { examTile, lessonTile, weatherTile, type Tone } from "@/lib/hero";
 import { dayString, formatTime } from "@/lib/time";
+import { euro } from "./webwerk-widget";
 
 /** Inhalt einer kompakten Kachel: Symbol + Titel, eine Kennzahl oder kurze Überschrift, eine Zeile Zusammenhang. */
 export type Summary = {
@@ -235,6 +238,25 @@ const SUMMARIES: Record<WidgetId, () => Promise<Summary>> = {
       caption: c.info?.freeBytes != null ? `${formatSize(c.info.freeBytes)} frei auf der Platte` : c.recent[0] ? `Zuletzt: ${c.recent[0].name}` : "Noch keine Dateien",
       tone: c.info?.freeBytes != null && c.info.freeBytes < 20 * 1024 ** 3 ? "warning" : "normal",
     }));
+  },
+  async webwerk() {
+    const r = await loadWebwerk();
+    return fromResult({ icon: Briefcase, color: "var(--cat-grades)", title: "Webwerk" }, r, (w) => {
+      const urgent = w.overdue.length + w.inquiries.filter((i) => i.urgent).length;
+      return {
+        value: String(w.todo),
+        unit: "zu tun",
+        caption: w.overdue.length
+          ? `${w.overdue.length}× Rechnung überfällig`
+          : w.inquiries.length
+            ? `${w.inquiries.length} neue ${w.inquiries.length === 1 ? "Anfrage" : "Anfragen"}`
+            : w.revenueMonth
+              ? `${euro(w.revenueMonth)} Umsatz im Monat`
+              : "Noch kein Umsatz",
+        tone: urgent ? "warning" : "normal",
+        captionTone: w.overdue.length ? "critical" : "normal",
+      };
+    });
   },
 };
 

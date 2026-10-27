@@ -12,6 +12,7 @@ import { getSettings } from "@/lib/settings";
 import { resolve } from "@/integrations/core";
 import { nextcloud } from "@/integrations/nextcloud";
 import { pihole } from "@/integrations/pihole";
+import { webwerk } from "@/integrations/webwerk";
 import { todaysSessions, toggleSession } from "@/lib/study";
 import { formatTime, lastDays, today, zonedToEpoch } from "@/lib/time";
 import { defineTool, type McpServerInfo, type McpToolAnnotations } from "./server";
@@ -28,7 +29,7 @@ export const LIFEOS_SERVER_INFO: McpServerInfo = {
   instructions:
     "Persönliches Dashboard von Luis (Schüler, Oberstufe Brandenburg). Mit `get_overview` starten – das liefert heute offene Habits, " +
     "anstehende Erinnerungen, fällige Karteikarten und Lerneinheiten in einem Aufruf. Zeiten und Tage in Europe/Berlin (YYYY-MM-DD, HH:MM). " +
-    "Noten sind Punkte 0–15 (Qualifikationsphase Q1–Q4). Lesezeit und Serie: `get_reading`. Für Stundenplan und Klausuren den Untis-Server nutzen. Löschen ist hier nicht möglich.",
+    "Noten sind Punkte 0–15 (Qualifikationsphase Q1–Q4). Lesezeit und Serie: `get_reading`. Luis führt nebenbei die Webdesign-Firma Webwerk Barnim: Anfragen, Termine und Rechnungen mit `get_webwerk`. Für Stundenplan und Klausuren den Untis-Server nutzen. Löschen ist hier nicht möglich.",
 };
 
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Format YYYY-MM-DD");
@@ -72,18 +73,30 @@ export const lifeosTools = [
   defineTool({
     name: "get_overview",
     description:
-      "Überblick für heute in einem Aufruf: offene und erledigte Habits, anstehende Erinnerungen, fällige Karteikarten und heutige Lerneinheiten. Erster Aufruf für Fragen wie „Was steht heute an?“.",
+      "Überblick für heute in einem Aufruf: offene und erledigte Habits, anstehende Erinnerungen, fällige Karteikarten, heutige Lerneinheiten und – falls verbunden – der Stand von Luis' Firma Webwerk (Details: get_webwerk). Erster Aufruf für Fragen wie „Was steht heute an?“.",
     input: z.object({}),
     annotations: READS,
     async run() {
       const day = todayStr();
       const habits = listHabits(db(), day, 1).map(habitView);
+      const ww = await resolve(webwerk, undefined);
       return {
         today: day,
         habits: { open: habits.filter((h) => !h.done), done: habits.filter((h) => h.done).map((h) => h.name) },
         reminders: listReminders(db()).map(reminderView),
         flashcards: cardsDue(),
         study_sessions: todaysSessions(db(), day).map((s) => ({ id: s.id, plan: s.planTitle, topic: s.topic, minutes: s.minutes, done: s.done, overdue: s.overdue })),
+        ...(ww.status === "ok"
+          ? {
+              webwerk: {
+                todo: ww.data.todo,
+                new_inquiries: ww.data.inquiries.length,
+                urgent_inquiries: ww.data.inquiries.filter((i) => i.urgent).length,
+                overdue_invoices: ww.data.overdue.length,
+                appointments_today: ww.data.appointments.filter((a) => a.startsAt.startsWith(day)).map((a) => `${a.startsAt.slice(11)} ${a.title}`),
+              },
+            }
+          : {}),
       };
     },
   }),
@@ -354,6 +367,23 @@ export const lifeosTools = [
               }
             : { status: c.status, message: c.status === "error" ? c.message : c.hint },
       };
+    },
+  }),
+
+  // ─── Webwerk Cockpit ─────────────────────────────────────────────────
+  defineTool({
+    name: "get_webwerk",
+    description:
+      "Webwerk Barnim (Luis' Webdesign-Firma) aus dem Cockpit: wie viel heute zu tun ist, neue Kundenanfragen, nächste Termine, überfällige Rechnungen, Umsatz und offene Beträge im Monat, Websites online. Nur lesen – Bearbeiten geht im Cockpit (Links in href).",
+    input: z.object({}),
+    annotations: READS,
+    async run() {
+      const r = await resolve(webwerk, undefined);
+      if (r.status !== "ok") return { status: r.status, message: r.status === "error" ? r.message : r.hint };
+      // generatedAt ist die Uhrzeit im Cockpit; zählt hier nur, wann LifeOS zuletzt abgefragt hat
+      const data: Partial<typeof r.data> = { ...r.data };
+      delete data.generatedAt;
+      return { ...data, fetched_at: new Date(r.fetchedAt).toISOString(), stale: r.stale };
     },
   }),
 ];

@@ -22,6 +22,7 @@ import { loadSummary, type Summary } from "@/components/widgets/summary-tiles";
 import { RemindersCard } from "@/components/widgets/reminders-card";
 import { TodayHero, TodayHeroSkeleton } from "@/components/widgets/today-hero";
 import { WeatherWidget } from "@/components/widgets/weather-widget";
+import { WebwerkWidget } from "@/components/widgets/webwerk-widget";
 import { loadSettings } from "@/integrations/loaders";
 import { WIDGETS, type WidgetId } from "@/lib/dashboard";
 import { cn } from "@/lib/utils";
@@ -43,6 +44,7 @@ const FULL: Record<WidgetId, ComponentType> = {
   grades: GradesWidget,
   pihole: PiholeWidget,
   cloud: NextcloudWidget,
+  webwerk: WebwerkWidget,
 };
 
 /** Sprungziele für die Tage-Kacheln */

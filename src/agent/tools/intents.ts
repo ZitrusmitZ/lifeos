@@ -139,6 +139,8 @@ export function matchToolIntent(input: string, knownServices: string[], now: Dat
   const homeserver = matchHomeserverIntent(text);
   if (homeserver) return homeserver;
 
+  if (WEBWERK_RE.test(text)) return { tool: "webwerk_status", params: {} };
+
   if (lower === "minecraft") return { tool: "minecraft_status", params: {} };
   return null;
 }
@@ -160,6 +162,10 @@ export function matchCoderIntent(input: string): ToolIntent | null {
 /** „deploy“, „deploy das neue Update“, „update deployen“, „neues Update einspielen“, „lifeos aktualisieren“ */
 const DEPLOY_RE =
   /^(?:bitte\s+)?(?:(?:lifeos\s+)?deploy(?:en)?(?:\s+(?:bitte|lifeos|(?:das\s+)?(?:neue[ns]?\s+)?(?:update|release|version)))?|(?:das\s+)?(?:neue[ns]?\s+)?(?:lifeos[- ]?)?(?:update|release|version)\s+(?:deployen|einspielen|installieren|ausrollen)|lifeos\s+(?:aktualisieren|updaten))(?:\s+bitte)?$/i;
+
+/** „Webwerk“, „Cockpit?“, „Was ist bei Webwerk los?“, „neue Anfragen?“ */
+const WEBWERK_RE =
+  /^(?:(?:wie läuft'?s|was (?:ist|gibt'?s) (?:neu|los))\s+(?:bei|im)\s+)?(?:webwerk(?:[- ]barnim)?|(?:webwerk[- ])?cockpit|(?:neue\s+)?(?:kunden)?anfragen)(?:[- ]?status)?[.!?]?$/i;
 
 const PIHOLE = String.raw`(?:pi-?hole|werbeblocker|adblocker)`;
 const CLOUD = String.raw`(?:nextcloud|cloud)`;

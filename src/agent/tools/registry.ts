@@ -10,6 +10,7 @@ import { describeCommand, helperCommand, SAFE_NAME, tail, type Runner } from "./
 import { formatSystemStatus, readSystemStatus } from "./system.ts";
 import { today } from "../../lib/time.ts";
 import { HOMESERVER_TOOLS } from "./homeserver.ts";
+import { WEBWERK_TOOLS } from "./webwerk.ts";
 import { CODER_TOOLS } from "./coder.ts";
 import { readPage, searchWeb } from "./web.ts";
 import type { CoderSessions } from "../coder/sessions.ts";
@@ -139,6 +140,7 @@ export const TOOLS = [
     },
   }),
   ...HOMESERVER_TOOLS,
+  ...WEBWERK_TOOLS,
   defineTool({
     name: "calendar_events",
     kind: "read",
