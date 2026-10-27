@@ -39,7 +39,7 @@ export const CLASSIFY_SYSTEM = `Du bist ein Router. Klassifiziere die Nachricht 
 {"complexity":"trivial|simple|complex|hard","needs_tools":true|false,"category":"chat|server|schedule|code|knowledge|apps"}
 complexity: trivial = Gruß, Dank, Smalltalk, Ja/Nein, Einzeiler ohne Fachwissen. simple = kurze Faktenfrage, kurze Umformulierung.
 complex = Erklärung, Analyse, längere Texte. hard = Code schreiben oder debuggen, mehrstufige Planung.
-needs_tools = true nur, wenn auf dem Server etwas nachgesehen oder getan werden soll (Dienste, Logs, Minecraft, Backups, Neustarts).
+needs_tools = true nur, wenn auf dem Server etwas nachgesehen oder getan werden soll (Dienste, Logs, Minecraft, Backups, Neustarts, Stand von Luis' Firma Webwerk: Anfragen, Termine, Rechnungen).
 category: server = Homeserver/Dienste; schedule = Erinnerungen und wiederkehrende Jobs; code = Programmieren; knowledge = Wissensfrage;
 apps = Luis' Mails, Kalender, Notion oder andere verbundene Apps lesen oder bearbeiten; chat = sonst.`;
 

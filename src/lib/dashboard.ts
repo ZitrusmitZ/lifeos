@@ -17,6 +17,7 @@ export const WIDGETS = {
   grades: "Noten",
   pihole: "Pi-hole",
   cloud: "Nextcloud",
+  webwerk: "Webwerk",
 } as const;
 
 export type WidgetId = keyof typeof WIDGETS;
@@ -44,6 +45,7 @@ export const DEFAULT_LAYOUT: DashboardLayout = [
   { id: "grades", mode: "compact" },
   { id: "pihole", mode: "compact" },
   { id: "cloud", mode: "compact" },
+  { id: "webwerk", mode: "compact" },
 ];
 
 /** Gespeichertes Layout bereinigen: unbekannte/doppelte Einträge raus, neue Widgets mit Standard hinten an. */

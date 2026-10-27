@@ -189,6 +189,26 @@ describe("Briefing zusammenstellen", () => {
     expect(x).toMatchObject({ lessons: null, exams: null, events: null, weather: null, failed: ["Stundenplan", "Wetter"] });
   });
 
+  it("nimmt den Webwerk-Stand auf: nur heutige Termine, Fehler als nicht erreichbar", () => {
+    const webwerk = {
+      generatedAt: "", url: "https://cockpit.example.org", todo: 3, revenueMonth: 0, openSum: 0,
+      overdue: [{ number: "R-1", company: "A", amount: 1, dueSince: null, href: "" }],
+      inquiries: [{ title: "x", company: "B", channel: "Telefon", urgent: true, href: "" }],
+      appointments: [
+        { startsAt: `${DAY}T16:30`, title: "Erstgespräch", company: null, href: "" },
+        { startsAt: "2026-10-14T10:00", title: "Später", company: null, href: "" },
+      ],
+      followUps: 0, proposals: 0, emailDrafts: 0, newLeads: 0, websites: { online: 0, total: 0 },
+    };
+    const sources = { school: ok(week), exams: ok([]), google: ok({ events: [] }), weather: ok(wx), news: null };
+    const w = assembleBriefing(DAY, { ...sources, webwerk: ok(webwerk) }, TZ);
+    expect(w.webwerk).toEqual({ todo: 3, inquiries: 1, urgent: 1, overdue: 1, appointments: ["16:30 Erstgespräch"] });
+    expect(briefingPushMessage(w).body).toContain("Webwerk: 3 zu tun");
+    const down = assembleBriefing(DAY, { ...sources, webwerk: { status: "error", message: "down" } }, TZ);
+    expect(down).toMatchObject({ webwerk: null, failed: ["Webwerk"] });
+    expect(assembleBriefing(DAY, sources, TZ).webwerk).toBeNull();
+  });
+
   it("ganztägige Termine gelten bis zum (exklusiven) Ende", () => {
     expect(eventsOn([ev("x", "2026-10-11", "2026-10-12", true)], DAY, TZ)).toEqual([]);
   });

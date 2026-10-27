@@ -5,6 +5,7 @@ import { google, type CalendarEvent } from "@/integrations/google";
 import { news } from "@/integrations/news";
 import { untis, type SchoolLesson, type SchoolWeek } from "@/integrations/untis";
 import { weather, type Weather } from "@/integrations/weather";
+import { webwerk, type WebwerkData } from "@/integrations/webwerk";
 import type { DB } from "./db";
 import { env, isDemo } from "./env";
 import { courseName } from "./hero";
@@ -46,8 +47,19 @@ export type Briefing = {
   exams: Exam[] | null;
   events: CalendarEvent[] | null;
   news: NewsDigest | null;
+  /** Webwerk Cockpit; fehlt in älteren gespeicherten Briefings, null = nicht verbunden/erreichbar */
+  webwerk?: BriefingWebwerk | null;
   /** Quellen, die gerade nicht erreichbar waren (nicht eingerichtete fehlen hier bewusst) */
   failed: string[];
+};
+
+export type BriefingWebwerk = {
+  todo: number;
+  inquiries: number;
+  urgent: number;
+  overdue: number;
+  /** heutige Termine, `HH:MM Titel` */
+  appointments: string[];
 };
 
 export type BriefingSources = {
@@ -56,6 +68,7 @@ export type BriefingSources = {
   google: WidgetResult<{ events: CalendarEvent[] }>;
   weather: WidgetResult<Weather>;
   news: NewsDigest | null;
+  webwerk?: WidgetResult<WebwerkData>;
 };
 
 const EXAM_HORIZON_DAYS = 14;
@@ -84,9 +97,10 @@ export function assembleBriefing(day: string, src: BriefingSources, tz: string, 
       ["Klausuren", src.exams],
       ["Kalender", src.google],
       ["Wetter", src.weather],
+      ["Webwerk", src.webwerk],
     ] as const
   )
-    .filter(([, r]) => r.status === "error")
+    .filter(([, r]) => r?.status === "error")
     .map(([name]) => name);
 
   return {
@@ -110,7 +124,20 @@ export function assembleBriefing(day: string, src: BriefingSources, tz: string, 
     exams: examList ? upcoming(examList, day).filter((x) => daysUntil(x.day, day) <= EXAM_HORIZON_DAYS) : null,
     events: events ? eventsOn(events, day, tz) : null,
     news: src.news,
+    webwerk: src.webwerk ? webwerkBrief(src.webwerk, day) : null,
     failed,
+  };
+}
+
+function webwerkBrief(r: WidgetResult<WebwerkData>, day: string): BriefingWebwerk | null {
+  if (r.status !== "ok") return null;
+  const w = r.data;
+  return {
+    todo: w.todo,
+    inquiries: w.inquiries.length,
+    urgent: w.inquiries.filter((i) => i.urgent).length,
+    overdue: w.overdue.length,
+    appointments: w.appointments.filter((a) => a.startsAt.startsWith(day)).map((a) => `${a.startsAt.slice(11)} ${a.title}`),
   };
 }
 
@@ -123,17 +150,18 @@ function coords(settings: Settings): { lat: number; lon: number } {
 export async function buildBriefing(db: DB, now: Date, tz: string): Promise<Briefing> {
   const day = dayString(now, tz);
   const settings = getSettings(db);
-  const [school, examList, cal, wx, feed] = await Promise.all([
+  const [school, examList, cal, wx, feed, ww] = await Promise.all([
     resolve(untis, undefined),
     resolve(exams, undefined),
     resolve(google, undefined),
     resolve(weather, coords(settings)),
     resolve(news, undefined),
+    resolve(webwerk, undefined),
   ]);
   const items = feed.status === "ok" ? recentNews(feed.data, now, tz) : null;
   // im Demo-Modus nie die KI fragen – die Mock-Meldungen reichen als Schlagzeilen
   const digest = items ? await summarizeNews(db, items, { ai: !isDemo() }) : null;
-  return assembleBriefing(day, { school, exams: examList, google: cal, weather: wx, news: digest }, tz, now.getTime());
+  return assembleBriefing(day, { school, exams: examList, google: cal, weather: wx, news: digest, webwerk: ww.status === "unconfigured" ? undefined : ww }, tz, now.getTime());
 }
 
 export function getBriefing(db: DB, day: string): Briefing | null {
@@ -219,6 +247,7 @@ export function briefingPushMessage(b: Briefing, studyMinutes = 0, dueCards = 0)
     parts.push(`${exam.label} ${d <= 0 ? "heute" : d === 1 ? "morgen" : `in ${d} Tagen`}`);
   }
   if (b.events?.length) parts.push(plural(b.events.length, "Termin", "Termine"));
+  if (b.webwerk?.todo) parts.push(`Webwerk: ${b.webwerk.todo} zu tun`);
   if (studyMinutes) parts.push(`${studyMinutes} Min. Lernen`);
   if (dueCards) parts.push(plural(dueCards, "Karte", "Karten"));
   if (b.news?.items.length) parts.push(plural(b.news.items.length, "Nachricht", "Nachrichten"));

@@ -16,6 +16,7 @@ import { WidgetSkeleton } from "@/components/widget-card";
 import { github } from "@/integrations/github";
 import { nextcloud } from "@/integrations/nextcloud";
 import { pihole } from "@/integrations/pihole";
+import { webwerk } from "@/integrations/webwerk";
 import { googleRedirectUri } from "@/integrations/google";
 import { spotifyRedirectUri } from "@/integrations/spotify";
 import { untis } from "@/integrations/untis";
@@ -99,6 +100,7 @@ async function SettingsContent({ searchParams }: { searchParams: Promise<Record<
   const [ghState, ghStatus] = simple(github.missingConfig());
   const [phState, phStatus] = simple(pihole.missingConfig());
   const [ncState, ncStatus] = simple(nextcloud.missingConfig());
+  const [wwState, wwStatus] = simple(webwerk.missingConfig());
   const ingestUrl = `${e.APP_URL}/api/ingest/health`;
 
   return (
@@ -260,6 +262,15 @@ async function SettingsContent({ searchParams }: { searchParams: Promise<Record<
           <p>
             App-Passwort mit <Code>occ user:auth-tokens:add &lt;nutzer&gt;</Code> erzeugen, dann <Code>NEXTCLOUD_URL</Code> (im Docker-Netz <Code>http://nextcloud</Code>),{" "}
             <Code>NEXTCLOUD_USER</Code>, <Code>NEXTCLOUD_APP_PASSWORD</Code> und optional <Code>NEXTCLOUD_PUBLIC_URL</Code> in die <Code>.env</Code>.
+          </p>
+        ) : null}
+      </Row>
+
+      <Row id="webwerk" title="Webwerk Cockpit" description="Firma: heute zu tun, neue Anfragen, Termine und offene Rechnungen aus dem Cockpit – nur lesen." state={wwState} status={wwStatus}>
+        {wwState !== "ok" ? (
+          <p>
+            Schlüssel mit <Code>openssl rand -hex 32</Code> erzeugen und auf beiden Seiten eintragen: im Cockpit als <Code>LIFEOS_TOKEN</Code>, hier als{" "}
+            <Code>WEBWERK_TOKEN</Code> (optional <Code>WEBWERK_URL</Code>, Standard <Code>https://cockpit.webwerk-barnim.de</Code>).
           </p>
         ) : null}
       </Row>

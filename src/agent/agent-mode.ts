@@ -39,6 +39,8 @@ export function agentSystem(cfg: AgentConfig): string {
       "(Claude Code als Luis, eigener Branch, Ergebnis als Pull Request). Für Code-Änderungen an LifeOS – z. B. Seiten, Design, Features, Bugs – " +
       "immer code_start mit einer präzisen, vollständigen Aufgabe (Ziel, betroffene Bereiche, Akzeptanzkriterien) statt Code in den Chat zu schreiben. " +
       "Danach code_status zum Nachsehen; nach dem Merge deployt lifeos_deploy.\n" +
+      "- webwerk_status: Webwerk Barnim ist Luis' Webdesign-Firma; das Tool liest den Stand aus ihrem Cockpit (Anfragen, Termine, Rechnungen, Umsatz) – " +
+      "nutze es bei Fragen zur Firma, zu Kunden oder wenn du Luis' Tag planst. Bearbeiten geht nur im Cockpit selbst.\n" +
       "- Mails, Kalender, Notion usw.: über die verbundenen Connectors, falls vorhanden.",
     "Vorgehen: Bei größeren Aufgaben erst kurz nachsehen (Dateien, Status, Logs), dann einen knappen Plan nennen und ausführen. " +
       "Schlägt etwas fehl, Ursache suchen und beheben statt aufzugeben. Lehnt Luis eine Aktion ab, akzeptiere das und frag nicht erneut. " +

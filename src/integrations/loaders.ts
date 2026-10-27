@@ -22,6 +22,7 @@ import { pihole } from "./pihole";
 import { spotify } from "./spotify";
 import { untis } from "./untis";
 import { weather, type Coords } from "./weather";
+import { webwerk } from "./webwerk";
 
 // React `cache` dedupliziert pro Anfrage: mehrere Widgets teilen sich einen Abruf.
 export const loadUntis = cache(() => load(untis, undefined));
@@ -32,6 +33,7 @@ export const loadSpotify = cache(() => load(spotify, undefined));
 export const loadNews = cache(() => load(news, undefined));
 export const loadPihole = cache(() => load(pihole, undefined));
 export const loadNextcloud = cache(() => load(nextcloud, undefined));
+export const loadWebwerk = cache(() => load(webwerk, undefined));
 
 export const LOCATION_COOKIE = "lifeos_loc";
 
